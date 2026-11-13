@@ -18,6 +18,11 @@ dist-ssr
 .env.*
 !.env.example
 
+# db dumps and local backups
+db/*.dump
+db/*.backup
+db/backups/
+
 # Netlify local folder
 .netlify
 
