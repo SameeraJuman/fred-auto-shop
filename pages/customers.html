@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Customers - Fred's Auto Electrical</title>
+    <link rel="stylesheet" href="/src/css/main.css" />
+</head>
+<body>
+    <!-- the sidebar and top bar are added by src/js/shared/page.js -->
+
+    <div class="flex flex-col">
+
+    <main class="flex-1 p-6 space-y-5">
+
+        <!-- page heading -->
+        <div class="flex items-start justify-between gap-3">
+            <div>
+                <h1 class="font-display text-3xl font-bold tracking-wider">CUSTOMERS</h1>
+                <p id="total-count" class="text-sm text-muted mt-1"></p>
+            </div>
+            <div class="flex items-center gap-3">
+                <button id="export-btn" class="btn btn-outlined hidden sm:inline-flex">Export CSV</button>
+                <button id="new-customer-btn" class="btn btn-primary">
+                    <span class="text-xl leading-none">+</span> New Customer
+                </button>
+            </div>
+        </div>
+
+        <!-- search, filter and sort -->
+        <section class="card p-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="relative flex-1 min-w-56 max-w-md">
+                    <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
+                    </svg>
+                    <input id="search" type="text" placeholder="Search by name, phone or plate number" class="field pl-9" />
+                </div>
+
+                <div class="flex flex-wrap items-center gap-3">
+                    <div class="flex bg-app border border-line-strong rounded-lg p-1 text-xs font-semibold">
+                        <button data-view="all" class="view-btn px-3 py-1.5 rounded-md"></button>
+                        <button data-view="multiple" class="view-btn px-3 py-1.5 rounded-md"></button>
+                    </div>
+
+                    <label class="flex items-center gap-2 text-xs text-muted">
+                        Sort
+                        <select id="sort" class="field w-auto py-1.5">
+                            <option value="date-desc">Member since (newest)</option>
+                            <option value="date-asc">Member since (oldest)</option>
+                            <option value="name-asc">Name (A-Z)</option>
+                            <option value="name-desc">Name (Z-A)</option>
+                            <option value="vehicles-desc">Most vehicles</option>
+                            <option value="vehicles-asc">Least vehicles</option>
+                            <option value="jobs-desc">Most jobs</option>
+                            <option value="jobs-asc">Least jobs</option>
+                        </select>
+                    </label>
+                </div>
+            </div>
+        </section>
+
+        <!-- customers table -->
+        <section class="card overflow-hidden">
+            <div class="max-h-[65vh] overflow-auto">
+                <table class="w-full text-left">
+                    <thead class="sticky top-0 z-10 bg-table-head text-[11px] font-bold tracking-wider uppercase border-b border-line">
+                        <tr>
+                            <th class="px-5 py-4">Customer</th>
+                            <th class="px-5 py-4">Phone</th>
+                            <th class="px-5 py-4">Member since</th>
+                            <th class="px-5 py-4 text-center"># Vehicles</th>
+                            <th class="px-5 py-4 text-center">Jobs</th>
+                            <th class="px-5 py-4">Vehicles</th>
+                            <th class="px-5 py-4 w-10"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="customers-body" class="divide-y divide-line"></tbody>
+                </table>
+            </div>
+            <p id="no-results" class="hidden p-8 text-center text-muted">No records found</p>
+            <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-t border-line">
+                <p id="showing-text" class="text-sm text-muted"></p>
+                <nav id="pagination" class="flex items-center border border-line-strong rounded-lg overflow-hidden text-sm"></nav>
+            </div>
+        </section>
+    </main>
+    </div>
+
+    <script type="module" src="/src/js/customers/customers.js"></script>
+</body>
+</html>
