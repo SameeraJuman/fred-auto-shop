@@ -66,6 +66,56 @@ INSERT INTO appointments (customer_id, vehicle_id, contact_number, service_reque
   ('00000000-0000-0000-0000-0000000000c3', '00000000-0000-0000-0000-0000000000a3', '592-600-3333', 'Headlight inspection', now() + interval '3 days', 'scheduled'),
   ('00000000-0000-0000-0000-0000000000c2', '00000000-0000-0000-0000-0000000000a2', '592-600-2222', 'Battery test',         now() - interval '2 days', 'missed');
 
+-- ============================================================================
+-- fred's auto electrical: extra missed appointments for the reports page
+-- run AFTER fred_database_full.sql and fake_data.sql. for development only.
+-- dates are worked out from now(), so there's always data this week, last week,
+-- earlier this month, last month and earlier in the year
+-- times are stored in utc: 14:00 utc is 10:00 am in guyana
+-- ============================================================================
+
+-- two more customers so the table isn't the same three names
+INSERT INTO customers (customer_id, full_name, phone_number, email, address) VALUES
+  ('00000000-0000-0000-0000-0000000000c4', 'Kevin Jagdeo',    '592-612-4890', NULL,                 'Lot 40 Middle Street, Georgetown'),
+  ('00000000-0000-0000-0000-0000000000c5', 'Amara Phillips',  '592-684-2103', 'amara@example.com',  'Diamond, East Bank Demerara');
+
+INSERT INTO vehicles (vehicle_id, customer_id, plate_number, make, model, year, colour, engine_trim) VALUES
+  ('00000000-0000-0000-0000-0000000000a4', '00000000-0000-0000-0000-0000000000c4', 'PAA 4321', 'Toyota', 'Prado',  2015, 'Grey',  '2.7L'),
+  ('00000000-0000-0000-0000-0000000000a5', '00000000-0000-0000-0000-0000000000c5', 'PBB 8765', 'Isuzu',  'D-Max',  2018, 'Red',   '3.0L');
+
+-- missed appointments, newest first
+INSERT INTO appointments (appointment_id, customer_id, vehicle_id, contact_number, service_requested, appointment_datetime, status) VALUES
+  -- this week (shows up in the default week view)
+  ('00000000-0000-0000-0000-0000000000e1', '00000000-0000-0000-0000-0000000000c4', '00000000-0000-0000-0000-0000000000a4',
+   '592-612-4890', 'Alternator not charging',            date_trunc('day', now()) - interval '1 day'  + interval '14 hours',             'missed'),
+  ('00000000-0000-0000-0000-0000000000e2', '00000000-0000-0000-0000-0000000000c5', '00000000-0000-0000-0000-0000000000a5',
+   '592-684-2103', 'Alternator pulley whine and belt',   date_trunc('day', now()) - interval '1 day'  + interval '18 hours 30 minutes', 'missed'),
+
+  -- last week (so the "vs last week" note has something to compare with)
+  ('00000000-0000-0000-0000-0000000000e3', '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000a1',
+   '592-600-1111', 'Central locking fault',              date_trunc('day', now()) - interval '8 days' + interval '15 hours',             'missed'),
+
+  -- earlier this month / last month
+  ('00000000-0000-0000-0000-0000000000e4', '00000000-0000-0000-0000-0000000000c3', '00000000-0000-0000-0000-0000000000a3',
+   '592-600-3333', 'Dashboard warning lights',           date_trunc('day', now()) - interval '15 days' + interval '13 hours',            'missed'),
+  ('00000000-0000-0000-0000-0000000000e5', '00000000-0000-0000-0000-0000000000c4', '00000000-0000-0000-0000-0000000000a4',
+   '592-612-4890', 'Starter clicking, won''t crank',     date_trunc('day', now()) - interval '35 days' + interval '16 hours',            'missed'),
+  ('00000000-0000-0000-0000-0000000000e6', '00000000-0000-0000-0000-0000000000c2', '00000000-0000-0000-0000-0000000000a2',
+   '592-600-2222', 'AC blower not working',              date_trunc('day', now()) - interval '42 days' + interval '14 hours',            'missed'),
+
+  -- earlier in the year (year view)
+  ('00000000-0000-0000-0000-0000000000e7', '00000000-0000-0000-0000-0000000000c5', '00000000-0000-0000-0000-0000000000a5',
+   '592-684-2103', 'Wiring check after accident',        date_trunc('day', now()) - interval '120 days' + interval '17 hours',           'missed'),
+  -- no vehicle on this one, to check the table handles that
+  ('00000000-0000-0000-0000-0000000000e8', '00000000-0000-0000-0000-0000000000c1', NULL,
+   '592-600-1111', 'Battery drain overnight',            date_trunc('day', now()) - interval '200 days' + interval '14 hours',           'missed');
+
+-- to remove just this data later:
+--   delete from appointments where appointment_id::text like '00000000-0000-0000-0000-0000000000e%';
+--   delete from vehicles  where vehicle_id  in ('00000000-0000-0000-0000-0000000000a4', '00000000-0000-0000-0000-0000000000a5');
+--   delete from customers where customer_id in ('00000000-0000-0000-0000-0000000000c4', '00000000-0000-0000-0000-0000000000c5');
+
+
 -- to remove all dev data later (children first):
 --   delete from sales_records; delete from job_photos; delete from job_parts;
 --   delete from appointments;  delete from jobs;       delete from vehicles;
