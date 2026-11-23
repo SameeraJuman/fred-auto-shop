@@ -68,6 +68,7 @@ CREATE TABLE appointments (
   service_requested     varchar(255) NOT NULL,
   appointment_datetime  timestamptz  NOT NULL,
   reminder_lead_minutes integer NOT NULL DEFAULT 60 CHECK (reminder_lead_minutes > 0),
+  reminder_enabled      boolean NOT NULL DEFAULT true,
   status                appointment_status NOT NULL DEFAULT 'scheduled',
   google_event_id       varchar(255),
   sync_status           sync_status NOT NULL DEFAULT 'pending',

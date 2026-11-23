@@ -23,7 +23,7 @@ const statuses = {
     scheduled:        { label: "Scheduled",        pill: "status-in-progress" },
     completed:        { label: "Completed",        pill: "status-delivered" },
     rescheduled:      { label: "Rescheduled",      pill: "status-awaiting-parts" },
-    cancelled:        { label: "Cancelled",        pill: "status-overdue" },
+    cancelled:        { label: "Cancelled",        pill: "status-not-started" },
     missed:           { label: "Missed",           pill: "status-overdue" },
 };
 
