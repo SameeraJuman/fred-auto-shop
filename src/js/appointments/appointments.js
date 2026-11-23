@@ -1,1539 +1,571 @@
-import { supabase } from '../lib/supabase.js';
-import { initPage } from '../shared/page.js';
-import { showToast } from '../shared/toast.js';
+// appointments page: calendar and list views, status filters, and the actions on each appointment
+// the record drawer is in appointment-drawer.js and the new / edit / reschedule boxes are in appointment-modals.js
+
+import { supabase } from "../lib/supabase.js";
+import { initPage } from "../shared/page.js";
+import { showToast } from "../shared/toast.js";
+import { confirmDialog, isConfirmOpen } from "../shared/confirm-dialog.js";
 import {
-    initQuickAddModal,
-    openQuickAddModal
-} from '../dashboard/quick-add-modal.js';
+    STATUS, icon, escapeHtml, statusBadge, sameDay, formatDateTime, formatTime,
+    vehicleLabel, reminderLabel, isOpenStatus,
+} from "./shared.js";
+import {
+    initAppointmentDrawer, openAppointmentDrawer, refreshAppointmentDrawer, closeAppointmentDrawer, isAppointmentDrawerOpen,
+} from "./appointment-drawer.js";
+import {
+    initAppointmentModals, openNewAppointment, openEditAppointment, openRescheduleAppointment, isAppointmentModalOpen,
+} from "./appointment-modals.js";
 
-/* =========================================================
-   APPOINTMENTS PAGE — FRED'S AUTO ELECTRICAL
-   ========================================================= */
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MAX_EVENTS_PER_DAY = 3; // calendar cells show this many, then "+2 more"
 
-const STATUS_LABELS = {
-    scheduled: 'Scheduled',
-    completed: 'Completed',
-    rescheduled: 'Rescheduled',
-    cancelled: 'Cancelled',
-    missed: 'Missed'
-};
-
-const STATUS_COLORS = {
-    scheduled: 'var(--color-secondary-400)',
-    completed: 'var(--color-primary-400)',
-    rescheduled: 'var(--color-status-awaiting-parts)',
-    cancelled: 'var(--color-status-overdue)',
-    missed: 'var(--color-tertiary-400)'
-};
-
+// ---------- state ----------
 const state = {
     appointments: [],
-    customers: [],
-    vehicles: [],
-    filter: 'all',
-    statusFilter: 'all',
-    view: 'calendar',
-    calendarMode: 'month',
-    dateRange: 'month',
-    currentDate: new Date(),
-    selectedDate: null,
+    view: "list",       // "list" or "calendar"
+    range: "month",     // "month", "week" or "day" (day is picked by clicking a calendar day)
+    cursor: startOfDay(new Date()), // any date inside the period on screen
+    tab: "upcoming",    // "upcoming", "past" or "all"
+    status: null,       // status filter, null shows every status
     userId: null,
-    loading: false
 };
 
 const $ = (id) => document.getElementById(id);
 
-/* =========================================================
-   HELPERS
-   ========================================================= */
-
-function escapeHtml(value) {
-    return String(value ?? '').replace(/[&<>"']/g, (char) => {
-        const entities = {
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#39;'
-        };
-
-        return entities[char];
-    });
+// ---------- dates ----------
+function startOfDay(date) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
-function formatDate(value, options = {}) {
-    if (!value) return 'Not specified';
+function addDays(date, days) {
+    const next = new Date(date);
+    next.setDate(next.getDate() + days);
+    return next;
+}
 
-    const date = new Date(value);
-
-    if (Number.isNaN(date.getTime())) {
-        return 'Invalid date';
+// first and last moment of the period on screen, as [start, end)
+function periodBounds() {
+    const c = state.cursor;
+    if (state.range === "day") return [startOfDay(c), addDays(startOfDay(c), 1)];
+    if (state.range === "week") {
+        const start = addDays(startOfDay(c), -c.getDay());
+        return [start, addDays(start, 7)];
     }
-
-    return new Intl.DateTimeFormat('en-US', options).format(date);
+    return [new Date(c.getFullYear(), c.getMonth(), 1), new Date(c.getFullYear(), c.getMonth() + 1, 1)];
 }
 
-function sameDay(first, second) {
-    return (
-        first.getFullYear() === second.getFullYear() &&
-        first.getMonth() === second.getMonth() &&
-        first.getDate() === second.getDate()
-    );
+function inPeriod(appointment) {
+    const [start, end] = periodBounds();
+    const date = new Date(appointment.appointment_datetime);
+    return date >= start && date < end;
 }
 
-function getLocalDateTime(value) {
-    const date = new Date(value);
-    const pad = (number) => String(number).padStart(2, '0');
-
-    return [
-        date.getFullYear(),
-        '-',
-        pad(date.getMonth() + 1),
-        '-',
-        pad(date.getDate()),
-        'T',
-        pad(date.getHours()),
-        ':',
-        pad(date.getMinutes())
-    ].join('');
-}
-
-function getCustomer(appointment) {
-    return (
-        appointment.customers ||
-        state.customers.find(
-            (customer) => customer.customer_id === appointment.customer_id
-        ) ||
-        null
-    );
-}
-
-function getVehicle(appointment) {
-    return (
-        appointment.vehicles ||
-        state.vehicles.find(
-            (vehicle) => vehicle.vehicle_id === appointment.vehicle_id
-        ) ||
-        null
-    );
-}
-
-function getVehicleName(vehicle) {
-    if (!vehicle) return 'No vehicle selected';
-
-    return [
-        vehicle.year,
-        vehicle.make,
-        vehicle.model
-    ].filter(Boolean).join(' ');
-}
-
-function getStatusBadge(status) {
-    const label = STATUS_LABELS[status] || status;
-
-    return `
-        <span class="appointment-status ${escapeHtml(status)}">
-            ${escapeHtml(label)}
-        </span>
-    `;
-}
-
-function showError(message) {
-    showToast('Error', message, 'error');
-}
-
-function closeModal() {
-    $('appointment-dialog-root').replaceChildren();
-    document.body.style.overflow = '';
-}
-
-function openModal(html) {
-    const root = $('appointment-dialog-root');
-
-    root.innerHTML = html;
-    document.body.style.overflow = 'hidden';
-
-    const overlay = root.querySelector('.appointment-modal-overlay');
-
-    overlay?.addEventListener('click', (event) => {
-        if (event.target === overlay) {
-            closeModal();
-        }
-    });
-
-    root.querySelectorAll('[data-close-modal]').forEach((button) => {
-        button.addEventListener('click', closeModal);
-    });
-}
-
-/* =========================================================
-   LOAD APPOINTMENTS
-   ========================================================= */
-
+// ---------- loading ----------
 async function loadAppointments() {
-    state.loading = true;
-
-    $('appointment-list').innerHTML = `
-        <div class="card p-8 text-center text-muted">
-            Loading appointments...
-        </div>
-    `;
-
     const { data, error } = await supabase
-        .from('appointments')
+        .from("appointments")
         .select(`
             *,
-            customers (
-                customer_id,
-                full_name,
-                phone_number
-            ),
-            vehicles (
-                vehicle_id,
-                customer_id,
-                year,
-                make,
-                model,
-                plate_number
-            )
+            customers ( customer_id, full_name, phone_number ),
+            vehicles ( vehicle_id, customer_id, year, make, model, plate_number, colour ),
+            profiles ( full_name )
         `)
-        .order('appointment_datetime', {
-            ascending: true
-        });
-
-    state.loading = false;
+        .order("appointment_datetime", { ascending: true });
 
     if (error) {
-        console.error('Failed to load appointments:', error);
-
-        $('appointment-list').innerHTML = `
-            <div class="appointment-empty">
-                <h3 class="appointment-empty-title">
-                    Unable to load appointments
-                </h3>
-                <p class="appointment-empty-description">
-                    Please try again.
-                </p>
-                <button id="retry-appointments" class="btn btn-secondary">
-                    Retry
-                </button>
-            </div>
-        `;
-
-        $('retry-appointments').addEventListener(
-            'click',
-            loadAppointments
-        );
-
-        showError(error.message);
+        console.error("Could not load appointments:", error);
+        $("appointment-list").innerHTML = `
+            <div class="card p-8 text-center space-y-3">
+                <p class="text-sm font-semibold">Couldn't load appointments</p>
+                <p class="text-xs text-muted">Check your connection and try again.</p>
+                <button type="button" id="retry" class="btn btn-secondary text-xs">Retry</button>
+            </div>`;
+        $("retry").addEventListener("click", loadAppointments);
         return;
     }
 
-    state.appointments = data || [];
+    state.appointments = data ?? [];
+    render();
 
-    renderPage();
+    // keep the drawer in step if it's showing one of these
+    refreshAppointmentDrawer(state.appointments);
 }
 
-/* =========================================================
-   LOAD CUSTOMERS AND VEHICLES
-   ========================================================= */
+const findAppointment = (id) => state.appointments.find((a) => a.appointment_id === id);
 
-async function loadFormData() {
-    const [customerResult, vehicleResult] = await Promise.all([
-        supabase
-            .from('customers')
-            .select('customer_id, full_name, phone_number')
-            .order('full_name'),
+// ---------- actions ----------
 
-        supabase
-            .from('vehicles')
-            .select(`
-                vehicle_id,
-                customer_id,
-                year,
-                make,
-                model,
-                plate_number
-            `)
-            .order('make')
-    ]);
+// saves a change to one appointment, then reloads the page
+async function updateAppointment(appointment, changes, message) {
+    const { error } = await supabase.from("appointments").update(changes).eq("appointment_id", appointment.appointment_id);
 
-    if (customerResult.error) {
-        throw customerResult.error;
+    if (error) {
+        console.error("Could not update appointment:", error);
+        showToast("Couldn't save the change", "Please try again", "error");
+        return false;
     }
 
-    if (vehicleResult.error) {
-        throw vehicleResult.error;
-    }
-
-    state.customers = customerResult.data || [];
-    state.vehicles = vehicleResult.data || [];
+    showToast(message, appointment.customers?.full_name ?? "");
+    await loadAppointments();
+    return true;
 }
 
-/* =========================================================
-   STATISTICS
-   ========================================================= */
+async function setStatus(appointment, status) {
+    const copy = {
+        cancelled: {
+            title: "Cancel this appointment?",
+            message: `${appointment.customers?.full_name ?? "The customer"} on ${formatDateTime(appointment.appointment_datetime)}.`,
+            confirmLabel: "Cancel appointment",
+            cancelLabel: "Keep it",
+            tone: "danger",
+            done: "Appointment cancelled",
+        },
+        missed: {
+            title: "Mark as missed?",
+            message: "Use this when the customer didn't turn up. It counts towards the missed appointments report.",
+            confirmLabel: "Mark as missed",
+            cancelLabel: "Go back",
+            tone: "danger",
+            done: "Marked as missed",
+        },
+        completed: {
+            title: "Mark as completed?",
+            message: "Use this once the customer has come in for the visit.",
+            confirmLabel: "Mark completed",
+            cancelLabel: "Go back",
+            tone: "primary",
+            done: "Marked as completed",
+        },
+    }[status];
 
-function renderStatistics() {
+    if (!copy) return;
+    const { done, ...dialog } = copy;
+    if (!(await confirmDialog(dialog))) return;
+
+    await updateAppointment(appointment, { status }, done);
+}
+
+async function toggleReminder(appointment) {
+    const enabled = appointment.reminder_enabled === false;
+    await updateAppointment(appointment, { reminder_enabled: enabled }, enabled ? "Reminder turned on" : "Reminder turned off");
+}
+
+// ---------- heading counts and period ----------
+function renderCounts() {
     const today = new Date();
+    const [start, end] = periodBounds();
+    const containsToday = today >= start && today < end;
 
-    const total = state.appointments.length;
+    const open = state.appointments.filter((a) => inPeriod(a) && isOpenStatus(a.status)).length;
 
-    const scheduledToday = state.appointments.filter((appointment) => {
-        const date = new Date(appointment.appointment_datetime);
-
-        return (
-            sameDay(date, today) &&
-            ['scheduled', 'rescheduled'].includes(appointment.status)
-        );
-    }).length;
-
-    $('total-count').textContent = total;
-    $('today-count').textContent = `${scheduledToday} scheduled today`;
-}
-
-/* =========================================================
-   FILTER APPOINTMENTS
-   ========================================================= */
-
-function getFilteredAppointments() {
-    const now = new Date();
-    const current = state.currentDate;
-
-    return state.appointments.filter((appointment) => {
-        const date = new Date(appointment.appointment_datetime);
-
-        // Colour-coded status filter
-        if (
-            state.statusFilter !== 'all' &&
-            appointment.status !== state.statusFilter
-        ) {
-            return false;
-        }
-
-        // Date range filter
-        let inRange = false;
-
-        if (state.dateRange === 'today') {
-            inRange = sameDay(date, current);
-        } else if (state.dateRange === 'week') {
-            const start = new Date(
-                current.getFullYear(),
-                current.getMonth(),
-                current.getDate()
-            );
-
-            start.setDate(start.getDate() - start.getDay());
-
-            const end = new Date(start);
-            end.setDate(end.getDate() + 7);
-
-            inRange = date >= start && date < end;
-        } else if (state.dateRange === 'month') {
-            inRange =
-                date.getFullYear() === current.getFullYear() &&
-                date.getMonth() === current.getMonth();
-        }
-
-        if (!inRange) return false;
-
-        // Upcoming / Past / All
-        if (state.filter === 'all') {
-            return true;
-        }
-
-        const active = ['scheduled', 'rescheduled'].includes(
-            appointment.status
-        );
-
-        if (state.filter === 'upcoming') {
-            return active && date >= now;
-        }
-
-        if (state.filter === 'past') {
-            return !active || date < now;
-        }
-
-        return true;
-    });
-}
-
-function updateFilterButtons() {
-    document.querySelectorAll('[data-filter]').forEach((button) => {
-        const active = button.dataset.filter === state.filter;
-
-        button.classList.toggle('active', active);
-        button.classList.toggle('text-accent', active);
-        button.classList.toggle('text-muted', !active);
-    });
-}
-
-/* =========================================================
-   APPOINTMENT CARDS
-   ========================================================= */
-
-function createAppointmentCard(appointment) {
-    const customer = getCustomer(appointment);
-    const vehicle = getVehicle(appointment);
-    const date = new Date(appointment.appointment_datetime);
-
-    const day = formatDate(date, { day: '2-digit' });
-    const month = formatDate(date, { month: 'short' });
-
-    const time = formatDate(date, {
-        hour: 'numeric',
-        minute: '2-digit'
-    });
-
-    const vehicleName = getVehicleName(vehicle);
-
-    const canCancel = ['scheduled', 'rescheduled'].includes(
-        appointment.status
-    );
-
-    const canReschedule = [
-        'scheduled',
-        'rescheduled',
-        'missed'
-    ].includes(appointment.status);
-
-    const reminderEnabled = appointment.reminder_enabled !== false;
-
-    return `
-        <div class="appointment-card"
-            data-appointment-id="${appointment.appointment_id}">
-
-            <div class="appointment-date">
-                <span class="appointment-date-day">${day}</span>
-                <span class="appointment-date-month">${month}</span>
-            </div>
-
-            <div class="appointment-info">
-                <div class="flex flex-wrap items-center gap-3">
-                    <h3 class="appointment-customer">
-                        ${escapeHtml(
-                            customer?.full_name || 'Unknown Customer'
-                        )}
-                    </h3>
-
-                    ${getStatusBadge(appointment.status)}
-                </div>
-
-                <p class="appointment-service">
-                    ${escapeHtml(appointment.service_requested)}
-                </p>
-
-                <div class="appointment-meta">
-                    <span class="appointment-meta-item">
-                        ${escapeHtml(time)}
-                    </span>
-
-                    <span class="appointment-meta-item">
-                        ${escapeHtml(vehicleName)}
-                    </span>
-                </div>
-            </div>
-
-            <div class="appointment-actions">
-                <button
-                    type="button"
-                    class="appointment-reminder-btn ${reminderEnabled ? 'enabled' : ''}"
-                    data-action="reminder"
-                    data-id="${appointment.appointment_id}"
-                    title="${reminderEnabled ? 'Disable reminder' : 'Enable reminder'}"
-                    aria-label="${reminderEnabled ? 'Disable reminder' : 'Enable reminder'}"
-                    aria-pressed="${reminderEnabled}"
-                    ${!canCancel ? 'disabled' : ''}
-                >
-                    <i data-lucide="${reminderEnabled ? 'bell-ring' : 'bell-off'}"></i>
-                </button>
-
-                <button
-                    type="button"
-                    class="btn btn-secondary text-xs"
-                    data-action="reschedule"
-                    data-id="${appointment.appointment_id}"
-                    ${!canReschedule ? 'disabled' : ''}
-                >
-                    Reschedule
-                </button>
-
-                <button
-                    type="button"
-                    class="btn appointment-cancel-btn text-xs"
-                    data-action="cancel"
-                    data-id="${appointment.appointment_id}"
-                    ${!canCancel ? 'disabled' : ''}
-                >
-                    Cancel
-                </button>
-            </div>
-        </div>
-    `;
-}
-
-/* =========================================================
-   LIST VIEW
-   ========================================================= */
-
-function renderAppointmentList() {
-    const container = $('appointment-list');
-    const appointments = getFilteredAppointments();
-
-    if (!appointments.length) {
-        container.innerHTML = `
-            <div class="appointment-empty">
-                <h3 class="appointment-empty-title">
-                    No appointments found
-                </h3>
-
-                <p class="appointment-empty-description">
-                    There are no appointments matching
-                    the selected filters.
-                </p>
-            </div>
-        `;
-
-        return;
-    }
-
-    container.innerHTML = appointments
-        .map(createAppointmentCard)
-        .join('');
-
-    if (window.lucide) {
-        window.lucide.createIcons();
-    }
-
-    container.querySelectorAll('[data-action]').forEach((button) => {
-        button.addEventListener('click', async () => {
-            const appointment = state.appointments.find(
-                (item) => item.appointment_id === button.dataset.id
-            );
-
-            if (!appointment) return;
-
-            const action = button.dataset.action;
-
-            if (action === 'reschedule') {
-                await openAppointmentForm(appointment);
-            }
-
-            if (action === 'cancel') {
-                const confirmed = window.confirm(
-                    'Are you sure you want to cancel this appointment?'
-                );
-
-                if (!confirmed) return;
-
-                button.disabled = true;
-
-                await updateAppointmentStatus(
-                    appointment.appointment_id,
-                    'cancelled'
-                );
-            }
-
-            if (action === 'reminder') {
-                button.disabled = true;
-                await toggleAppointmentReminder(appointment);
-            }
-        });
-    });
-}
-
-/* =========================================================
-   CALENDAR VIEW
-   ========================================================= */
-
-function renderCalendar() {
-    const container = $('appointment-calendar');
-    const current = state.currentDate;
-
-    let startDate;
-    let numberOfDays;
-
-    if (state.dateRange === 'today') {
-        startDate = new Date(
-            current.getFullYear(),
-            current.getMonth(),
-            current.getDate()
-        );
-
-        numberOfDays = 1;
-    } else if (state.dateRange === 'week') {
-        startDate = new Date(
-            current.getFullYear(),
-            current.getMonth(),
-            current.getDate()
-        );
-
-        startDate.setDate(
-            startDate.getDate() - startDate.getDay()
-        );
-
-        numberOfDays = 7;
+    let when;
+    if (state.range === "day") {
+        when = sameDay(state.cursor, today) ? "today" : `on ${state.cursor.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+    } else if (state.range === "week") {
+        when = containsToday ? "this week" : `week of ${start.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
     } else {
-        startDate = new Date(
-            current.getFullYear(),
-            current.getMonth(),
-            1
-        );
-
-        startDate.setDate(
-            startDate.getDate() - startDate.getDay()
-        );
-
-        numberOfDays = 42;
+        when = containsToday ? "this month" : `in ${start.toLocaleDateString("en-US", { month: "long" })}`;
     }
 
-    const appointments = getFilteredAppointments();
-
-    const weekdays = [
-        'Sun', 'Mon', 'Tue', 'Wed',
-        'Thu', 'Fri', 'Sat'
-    ];
-
-    let html = `
-        <div class="appointment-calendar-grid">
-    `;
-
-    if (state.dateRange === 'today') {
-        html += `
-            <div class="appointment-calendar-heading"
-                style="grid-column: 1 / -1">
-                ${formatDate(current, {
-                    weekday: 'long',
-                    month: 'long',
-                    day: 'numeric'
-                })}
-            </div>
-        `;
-    } else {
-        html += weekdays.map((day) => `
-            <div class="appointment-calendar-heading">
-                ${day}
-            </div>
-        `).join('');
-    }
-
-    for (let index = 0; index < numberOfDays; index++) {
-        const day = new Date(startDate);
-        day.setDate(startDate.getDate() + index);
-
-        const dayAppointments = appointments.filter(
-            (appointment) => sameDay(
-                new Date(appointment.appointment_datetime),
-                day
-            )
-        );
-
-        const isToday = sameDay(day, new Date());
-
-        const outsideMonth =
-            state.dateRange === 'month' &&
-            day.getMonth() !== current.getMonth();
-
-        const dateKey = [
-            day.getFullYear(),
-            String(day.getMonth() + 1).padStart(2, '0'),
-            String(day.getDate()).padStart(2, '0')
-        ].join('-');
-
-        html += `
-            <button
-                type="button"
-                class="appointment-calendar-day
-                    ${isToday ? 'today' : ''}
-                    ${outsideMonth ? 'outside-month' : ''}"
-                data-calendar-date="${dateKey}"
-                ${state.dateRange === 'today'
-                    ? 'style="grid-column: 1 / -1"'
-                    : ''}
-            >
-                <span class="appointment-calendar-date">
-                    ${day.getDate()}
-                </span>
-
-                ${dayAppointments.map((appointment) => `
-                    <span class="appointment-calendar-event
-                        ${escapeHtml(appointment.status)}">
-                        ${escapeHtml(
-                            getCustomer(appointment)?.full_name ||
-                            'Appointment'
-                        )}
-                    </span>
-                `).join('')}
-            </button>
-        `;
-    }
-
-    html += '</div>';
-
-    container.innerHTML = html;
-
-    container.querySelectorAll('[data-calendar-date]').forEach((button) => {
-        button.addEventListener('click', () => {
-            const [year, month, day] =
-                button.dataset.calendarDate
-                    .split('-')
-                    .map(Number);
-
-            state.currentDate = new Date(year, month - 1, day);
-            state.dateRange = 'today';
-            state.selectedDate = null;
-
-            renderPage();
-        });
-    });
+    $("total-count").textContent = state.appointments.length;
+    $("range-count").textContent = `${open} scheduled ${when}`;
 }
-
-/* =========================================================
-   PERIOD NAVIGATION
-   ========================================================= */
 
 function renderPeriod() {
-    const date = state.currentDate;
+    const [start, end] = periodBounds();
+    let text;
 
-    if (state.dateRange === 'today') {
-        $('period').textContent = formatDate(date, {
-            weekday: 'long',
-            month: 'long',
-            day: 'numeric',
-            year: 'numeric'
-        });
-    } else if (state.dateRange === 'week') {
-        const start = new Date(date);
-
-        start.setDate(date.getDate() - date.getDay());
-
-        const end = new Date(start);
-        end.setDate(start.getDate() + 6);
-
-        $('period').textContent =
-            `${formatDate(start, {
-                month: 'short',
-                day: 'numeric'
-            })} - ${formatDate(end, {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric'
-            })}`;
+    if (state.range === "day") {
+        text = state.cursor.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric" });
+    } else if (state.range === "week") {
+        const last = addDays(end, -1);
+        text = `${start.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${last.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
     } else {
-        $('period').textContent = formatDate(date, {
-            month: 'long',
-            year: 'numeric'
-        });
-    }
-}
-
-function changePeriod(direction) {
-    const date = new Date(state.currentDate);
-
-    if (state.dateRange === 'today') {
-        date.setDate(date.getDate() + direction);
-    } else if (state.dateRange === 'week') {
-        date.setDate(date.getDate() + direction * 7);
-    } else {
-        date.setDate(1);
-        date.setMonth(date.getMonth() + direction);
+        text = start.toLocaleDateString("en-US", { month: "long", year: "numeric" });
     }
 
-    state.currentDate = date;
-    state.selectedDate = null;
-
-    renderPage();
+    $("period").textContent = text;
 }
 
-/* =========================================================
-   CLICKABLE COLOUR-CODED STATUS FILTERS
-   ========================================================= */
+// ---------- toggles, tabs and status filters ----------
+function renderControls() {
+    document.querySelectorAll(".view-btn").forEach((btn) => {
+        const selected = btn.dataset.view === state.view;
+        btn.classList.toggle("bg-accent/15", selected);
+        btn.classList.toggle("text-accent", selected);
+        btn.classList.toggle("text-muted", !selected);
+        btn.classList.toggle("hover:text-ink", !selected);
+        btn.setAttribute("aria-pressed", selected);
+    });
+
+    document.querySelectorAll(".range-btn").forEach((btn) => {
+        const selected = btn.dataset.range === state.range;
+        btn.classList.toggle("bg-accent", selected);
+        btn.classList.toggle("text-neutral-950", selected);
+        btn.classList.toggle("text-muted", !selected);
+        btn.classList.toggle("hover:text-ink", !selected);
+        btn.setAttribute("aria-pressed", selected);
+    });
+
+    // the underline is always there (transparent when not selected), so the tabs never shift
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+        const selected = btn.dataset.tab === state.tab;
+        btn.classList.toggle("border-accent", selected);
+        btn.classList.toggle("text-accent", selected);
+        btn.classList.toggle("border-transparent", !selected);
+        btn.classList.toggle("text-muted", !selected);
+        btn.classList.toggle("hover:text-ink", !selected);
+        btn.setAttribute("aria-pressed", selected);
+    });
+
+    $("tabs").classList.toggle("hidden", state.view !== "list");
+    $("appointment-list").classList.toggle("hidden", state.view !== "list");
+    $("appointment-calendar").classList.toggle("hidden", state.view !== "calendar");
+}
 
 function renderLegend() {
-    const legend = $('legend');
-
-    if (!legend) return;
-
-    const statuses = [
-        ['all', 'All'],
-        ...Object.entries(STATUS_LABELS)
-    ];
-
-    legend.innerHTML = statuses.map(([status, label]) => {
-        const selected = state.statusFilter === status;
-
-        const dot = status === 'all'
-            ? ''
-            : `
-                <span
-                    class="appointment-status-dot"
-                    style="background-color: ${STATUS_COLORS[status]}"
-                ></span>
-            `;
-
+    // every chip keeps the same 1px border and padding whether it's selected or not,
+    // only the colours change, so nothing moves when you click
+    $("legend").innerHTML = Object.entries(STATUS).map(([key, info]) => {
+        const selected = state.status === key;
+        const look = selected ? info.chip : "bg-raised border-transparent text-ink/80 hover:text-ink hover:border-line-strong";
         return `
-            <button
-                type="button"
-                class="appointment-legend-item appointment-legend-filter
-                    ${selected ? 'active' : ''}"
-                data-status-filter="${status}"
-                aria-pressed="${selected}"
-            >
-                ${dot}
-                ${escapeHtml(label)}
-            </button>
-        `;
-    }).join('');
+            <button type="button" data-status="${key}" aria-pressed="${selected}"
+                class="inline-flex items-center gap-2 px-2.5 py-1 rounded-md border text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer ${look}">
+                <span class="size-2 rounded-full ${info.dot}"></span>${info.label}
+            </button>`;
+    }).join("");
+}
 
-    legend.querySelectorAll('[data-status-filter]').forEach((button) => {
-        button.addEventListener('click', () => {
-            const selectedStatus = button.dataset.statusFilter;
+// ---------- list view ----------
+function listedAppointments() {
+    const now = new Date();
 
-            state.statusFilter =
-                state.statusFilter === selectedStatus
-                    ? 'all'
-                    : selectedStatus;
+    const list = state.appointments.filter((a) => {
+        if (!inPeriod(a)) return false;
+        if (state.status && a.status !== state.status) return false;
 
-            renderPage();
-        });
+        const upcoming = isOpenStatus(a.status) && new Date(a.appointment_datetime) >= now;
+        if (state.tab === "upcoming") return upcoming;
+        if (state.tab === "past") return !upcoming;
+        return true;
     });
+
+    // upcoming reads soonest first, past and all read newest first
+    const direction = state.tab === "upcoming" ? 1 : -1;
+    return list.sort((a, b) => direction * (new Date(a.appointment_datetime) - new Date(b.appointment_datetime)));
 }
 
-function installLegendStyles() {
-    if (document.getElementById('appointment-legend-filter-styles')) {
-        return;
+function dateBlock(appointment) {
+    const date = new Date(appointment.appointment_datetime);
+    const closed = !isOpenStatus(appointment.status);
+
+    if (sameDay(date, new Date())) {
+        return `<span class="text-[11px] font-bold tracking-wider text-accent">TODAY</span>`;
     }
 
-    const style = document.createElement('style');
-    style.id = 'appointment-legend-filter-styles';
-
-    style.textContent = `
-        .appointment-legend-filter {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 7px 12px;
-            border: 1px solid transparent;
-            border-radius: 8px;
-            background: transparent;
-            color: var(--color-muted);
-            font-size: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background .2s, border-color .2s, color .2s;
-        }
-
-        .appointment-legend-filter:hover {
-            background: var(--color-raised);
-            color: var(--color-ink);
-        }
-
-        .appointment-legend-filter.active {
-            background: var(--color-raised);
-            border-color: var(--color-accent);
-            color: var(--color-ink);
-        }
-
-        .appointment-legend-filter .appointment-status-dot {
-            width: 9px;
-            height: 9px;
-            border-radius: 50%;
-            flex-shrink: 0;
-        }
-    `;
-
-    document.head.appendChild(style);
+    return `
+        <span class="text-[10px] font-bold tracking-wider text-muted uppercase">${date.toLocaleDateString("en-US", { month: "short" })}</span>
+        <span class="font-display text-lg font-bold leading-tight ${closed ? "text-muted" : "text-accent"}">${date.getDate()}</span>`;
 }
 
-/* =========================================================
-   NEW / EDIT APPOINTMENT FORM
-   ========================================================= */
+function card(appointment) {
+    const open = isOpenStatus(appointment.status);
+    const reminderOn = appointment.reminder_enabled !== false;
+    const name = appointment.customers?.full_name ?? "Unknown customer";
 
+    return `
+        <article data-open="${appointment.appointment_id}" tabindex="0" role="button"
+            aria-label="Open appointment for ${escapeHtml(name)}"
+            class="group card px-4 py-4 flex items-center gap-4 cursor-pointer hover:bg-raised hover:border-line-strong transition focus:outline-none focus-visible:border-accent">
 
-async function openAppointmentForm(appointment = null) {
-    try {
-        await loadFormData();
-    } catch (error) {
-        showError(error.message);
-        return;
-    }
+            <!-- date -->
+            <div class="w-12 shrink-0 flex flex-col items-center justify-center text-center">${dateBlock(appointment)}</div>
 
-    const editing = Boolean(appointment);
-
-    const customerOptions = state.customers.map(customer => `
-        <option value="${customer.customer_id}"
-            ${appointment?.customer_id === customer.customer_id ? 'selected' : ''}>
-            ${escapeHtml(customer.full_name)}
-        </option>
-    `).join('');
-
-    const reminderOptions = [
-        [15, '15 minutes before'],
-        [30, '30 minutes before'],
-        [60, '1 hour before'],
-        [120, '2 hours before'],
-        [1440, '1 day before']
-    ].map(([minutes, label]) => `
-        <option value="${minutes}"
-            ${Number(appointment?.reminder_lead_minutes ?? 60) === minutes ? 'selected' : ''}>
-            ${label}
-        </option>
-    `).join('');
-
-    const fieldLabel = (id, label, required = false) => `
-        <label for="${id}"
-            class="block text-[11px] font-semibold uppercase tracking-wider text-muted font-display mb-1.5">
-            ${label}${required ? ' <span class="text-status-overdue">*</span>' : ''}
-        </label>
-    `;
-
-    openModal(`
-        <div class="appointment-modal-overlay fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] overflow-y-auto p-4 flex">
-            <div class="m-auto w-full max-w-lg bg-app border border-line rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]"
-                role="dialog" aria-modal="true"
-                aria-labelledby="appointment-modal-title">
-
-                <header class="px-6 py-4 border-b border-line bg-surface flex items-center justify-between gap-3 shrink-0">
-                    <div class="flex items-center gap-3">
-                        <div class="size-9 rounded-lg bg-accent/15 text-accent border border-accent/30 flex items-center justify-center">
-                            <svg class="size-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                                <path d="M17 12h-5v5h5v-5zM16 1v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-1V1h-2zm3 18H5V8h14v11z"/>
-                            </svg>
-                        </div>
-                        <h2 id="appointment-modal-title"
-                            class="font-display text-base uppercase font-bold tracking-wider">
-                            ${editing ? 'Reschedule Appointment' : 'New Appointment'}
-                        </h2>
-                    </div>
-
-                    <button type="button" data-close-modal
-                        class="size-8 rounded-lg bg-raised hover:bg-line-strong text-muted hover:text-ink flex items-center justify-center transition cursor-pointer"
-                        aria-label="Close">
-                        &times;
-                    </button>
-                </header>
-
-                <form id="appointment-form" class="flex flex-col min-h-0" novalidate>
-                    <div class="flex-1 overflow-y-auto p-6 flex flex-col gap-5">
-
-                        <div>
-                            ${fieldLabel('appointment-customer', 'Customer', true)}
-                            <select id="appointment-customer" name="customer_id" class="field cursor-pointer" required>
-                                <option value="">Select customer</option>
-                                ${customerOptions}
-                            </select>
-                        </div>
-
-                        <div>
-                            ${fieldLabel('appointment-vehicle', 'Vehicle')}
-                            <select id="appointment-vehicle" name="vehicle_id" class="field cursor-pointer">
-                                <option value="">Select a customer first</option>
-                            </select>
-                        </div>
-
-                        <div>
-                            ${fieldLabel('appointment-contact', 'Contact number', true)}
-                            <input id="appointment-contact" name="contact_number"
-                                type="tel" maxlength="20" class="field"
-                                placeholder="Filled in from the customer"
-                                value="${escapeHtml(appointment?.contact_number || '')}" required />
-                        </div>
-
-                        <div>
-                            ${fieldLabel('appointment-service', 'Service requested', true)}
-                            <input id="appointment-service" name="service_requested"
-                                type="text" maxlength="255" class="field"
-                                placeholder="e.g. Alternator not charging"
-                                value="${escapeHtml(appointment?.service_requested || '')}" required />
-                        </div>
-
-                        <div>
-                            ${fieldLabel('appointment-datetime', 'Date and time', true)}
-                            <input id="appointment-datetime" name="appointment_datetime"
-                                type="datetime-local" class="field"
-                                value="${editing ? getLocalDateTime(appointment.appointment_datetime) : ''}"
-                                required />
-                        </div>
-
-                        <div>
-                            ${fieldLabel('appointment-reminder', 'Reminder')}
-                            <select id="appointment-reminder" name="reminder_lead_minutes"
-                                class="field cursor-pointer">
-                                ${reminderOptions}
-                            </select>
-                        </div>
-
-                    </div>
-
-                    <footer class="px-6 py-4 border-t border-line bg-surface flex flex-wrap items-center justify-end gap-2 shrink-0">
-                        <button type="button" data-close-modal class="btn btn-secondary">
-                            Cancel
-                        </button>
-                        <button type="submit" id="save-appointment" class="btn btn-primary">
-                            ${editing ? 'Save Changes' : 'Save Appointment'}
-                        </button>
-                    </footer>
-                </form>
+            <div class="min-w-0 flex-1 space-y-1.5">
+                <div class="flex flex-wrap items-center gap-2">
+                    <h3 class="text-sm font-bold">${escapeHtml(name)}</h3>
+                    ${statusBadge(appointment.status)}
+                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-line-strong text-[10px] font-semibold text-muted">
+                        ${icon(reminderOn ? "bell" : "bellOff", "size-3")} ${reminderLabel(appointment)}
+                    </span>
+                </div>
+                <p class="flex items-center gap-1.5 text-xs font-semibold text-accent">
+                    ${icon("wrench", "size-3.5")}<span class="truncate">${escapeHtml(appointment.service_requested)}</span>
+                </p>
+                <p class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+                    <span>${formatDateTime(appointment.appointment_datetime)}</span>
+                    <span aria-hidden="true">•</span>
+                    <span class="inline-flex items-center gap-1">${icon("car", "size-3.5")}${escapeHtml(vehicleLabel(appointment.vehicles))}</span>
+                </p>
             </div>
-        </div>
-    `);
 
-    const form = $('appointment-form');
-    const customerSelect = $('appointment-customer');
-    const vehicleSelect = $('appointment-vehicle');
-    const contactInput = $('appointment-contact');
-
-    function updateVehicleOptions() {
-        const customerId = customerSelect.value;
-        const vehicles = state.vehicles.filter(
-            vehicle => vehicle.customer_id === customerId
-        );
-
-        vehicleSelect.innerHTML = `
-            <option value="">${vehicles.length ? 'Not specified yet' : 'No vehicles on file'}</option>
-            ${vehicles.map(vehicle => `
-                <option value="${vehicle.vehicle_id}"
-                    ${appointment?.vehicle_id === vehicle.vehicle_id ? 'selected' : ''}>
-                    ${escapeHtml(getVehicleName(vehicle))}
-                    ${vehicle.plate_number ? ` (${escapeHtml(vehicle.plate_number)})` : ''}
-                </option>
-            `).join('')}
-        `;
-
-        vehicleSelect.disabled = !customerId || vehicles.length === 0;
-    }
-
-    customerSelect.addEventListener('change', () => {
-        updateVehicleOptions();
-
-        const customer = state.customers.find(
-            item => item.customer_id === customerSelect.value
-        );
-
-        contactInput.value = customer?.phone_number || '';
-    });
-
-    updateVehicleOptions();
-
-    form.addEventListener('submit', async event => {
-        event.preventDefault();
-        await saveAppointment(form, appointment);
-    });
-}
-
-
-/* =========================================================
-   SAVE APPOINTMENT
-   ========================================================= */
-
-async function saveAppointment(form, existingAppointment = null) {
-    const saveButton = $('save-appointment');
-    const formData = new FormData(form);
-
-    const appointmentDate = new Date(
-        formData.get('appointment_datetime')
-    );
-
-    if (Number.isNaN(appointmentDate.getTime())) {
-        showError('Please select a valid appointment date.');
-        return;
-    }
-
-    const payload = {
-        customer_id: formData.get('customer_id'),
-        vehicle_id: formData.get('vehicle_id') || null,
-        contact_number: String(
-            formData.get('contact_number')
-        ).trim(),
-        service_requested: String(
-            formData.get('service_requested')
-        ).trim(),
-        appointment_datetime: appointmentDate.toISOString(),
-        reminder_lead_minutes: Number(
-            formData.get('reminder_lead_minutes')
-        )
-    };
-
-    if (
-        !payload.customer_id ||
-        !payload.contact_number ||
-        !payload.service_requested
-    ) {
-        showError('Please complete all required fields.');
-        return;
-    }
-
-    saveButton.disabled = true;
-    saveButton.textContent = 'Saving...';
-
-    try {
-        let result;
-
-        if (existingAppointment) {
-            if (
-                new Date(existingAppointment.appointment_datetime)
-                    .getTime() !== appointmentDate.getTime() &&
-                ['scheduled', 'rescheduled', 'missed'].includes(
-                    existingAppointment.status
-                )
-            ) {
-                payload.status = 'rescheduled';
-            }
-
-            result = await supabase
-                .from('appointments')
-                .update(payload)
-                .eq(
-                    'appointment_id',
-                    existingAppointment.appointment_id
-                );
-        } else {
-            payload.created_by = state.userId;
-            payload.status = 'scheduled';
-
-            result = await supabase
-                .from('appointments')
-                .insert(payload);
-        }
-
-        if (result.error) {
-            throw result.error;
-        }
-
-        closeModal();
-
-        showToast(
-            existingAppointment
-                ? 'Appointment updated'
-                : 'Appointment created'
-        );
-
-        await loadAppointments();
-    } catch (error) {
-        console.error('Save appointment error:', error);
-        showError(error.message);
-    } finally {
-        if (saveButton.isConnected) {
-            saveButton.disabled = false;
-            saveButton.textContent = 'Save Appointment';
-        }
-    }
-}
-
-/* =========================================================
-   APPOINTMENT DETAILS
-   ========================================================= */
-
-function openAppointmentDetails(appointment) {
-    const customer = getCustomer(appointment);
-    const vehicle = getVehicle(appointment);
-
-    const formattedDate = formatDate(
-        appointment.appointment_datetime,
-        {
-            dateStyle: 'full',
-            timeStyle: 'short'
-        }
-    );
-
-    const statusOptions = Object.entries(STATUS_LABELS)
-        .map(([value, label]) => `
-            <option
-                value="${value}"
-                ${appointment.status === value ? 'selected' : ''}
-            >
-                ${label}
-            </option>
-        `).join('');
-
-    openModal(`
-        <div class="appointment-modal-overlay">
-            <div
-                class="appointment-modal"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="appointment-details-title"
-            >
-                <div class="appointment-modal-header">
-                    <h2
-                        id="appointment-details-title"
-                        class="appointment-modal-title"
-                    >
-                        Appointment Details
-                    </h2>
-
-                    <button
-                        type="button"
-                        data-close-modal
-                        class="btn btn-secondary"
-                    >
-                        &times;
-                    </button>
-                </div>
-
-                <div class="appointment-modal-body space-y-6">
-                    <div>
-                        <div class="flex flex-wrap items-center gap-3">
-                            <h3 class="font-display text-xl font-bold">
-                                ${escapeHtml(
-                                    customer?.full_name ||
-                                    'Unknown Customer'
-                                )}
-                            </h3>
-
-                            ${getStatusBadge(appointment.status)}
-                        </div>
-
-                        <p class="mt-2 text-sm text-accent">
-                            ${escapeHtml(appointment.service_requested)}
-                        </p>
-                    </div>
-
-                    <div class="grid gap-5 sm:grid-cols-2">
-                        <div>
-                            <p class="text-xs text-muted uppercase">
-                                Date & Time
-                            </p>
-                            <p class="mt-2 text-sm font-semibold">
-                                ${escapeHtml(formattedDate)}
-                            </p>
-                        </div>
-
-                        <div>
-                            <p class="text-xs text-muted uppercase">
-                                Contact Number
-                            </p>
-                            <p class="mt-2 text-sm font-semibold">
-                                ${escapeHtml(appointment.contact_number)}
-                            </p>
-                        </div>
-
-                        <div>
-                            <p class="text-xs text-muted uppercase">
-                                Vehicle
-                            </p>
-                            <p class="mt-2 text-sm font-semibold">
-                                ${escapeHtml(getVehicleName(vehicle))}
-                            </p>
-                        </div>
-
-                        <div>
-                            <p class="text-xs text-muted uppercase">
-                                Reminder
-                            </p>
-                            <p class="mt-2 text-sm font-semibold">
-                                ${Number(
-                                    appointment.reminder_lead_minutes ?? 60
-                                )} minutes before
-                            </p>
-                        </div>
-                    </div>
-
-                    <div>
-                        <label
-                            for="appointment-detail-status"
-                            class="block mb-2 text-xs text-muted uppercase"
-                        >
-                            Appointment Status
-                        </label>
-
-                        <select
-                            id="appointment-detail-status"
-                            class="field"
-                        >
-                            ${statusOptions}
-                        </select>
-                    </div>
-                </div>
-
-                <div class="appointment-modal-footer">
-                    <button
-                        type="button"
-                        id="cancel-appointment"
-                        class="btn btn-danger"
-                    >
-                        Cancel Appointment
-                    </button>
-
-                    <button
-                        type="button"
-                        id="update-appointment-status"
-                        class="btn btn-secondary"
-                    >
-                        Update Status
-                    </button>
-
-                    <button
-                        type="button"
-                        id="edit-appointment"
-                        class="btn btn-primary"
-                    >
-                        Edit / Reschedule
-                    </button>
-                </div>
+            <!-- quick actions; clicks here don't open the drawer -->
+            <div class="flex items-center gap-1 shrink-0">
+                <button type="button" data-action="reminder" data-id="${appointment.appointment_id}"
+                    class="size-8 rounded-lg flex items-center justify-center transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed
+                           ${reminderOn ? "text-accent hover:bg-accent/10" : "text-muted hover:bg-raised hover:text-ink"}"
+                    title="${reminderOn ? "Turn reminder off" : "Turn reminder on"}" aria-label="${reminderOn ? "Turn reminder off" : "Turn reminder on"}"
+                    aria-pressed="${reminderOn}" ${open ? "" : "disabled"}>
+                    ${icon(reminderOn ? "bell" : "bellOff", "size-4")}
+                </button>
+                ${open ? `
+                <button type="button" data-action="cancel" data-id="${appointment.appointment_id}"
+                    class="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-muted hover:text-status-overdue hover:bg-status-overdue/10 transition cursor-pointer">
+                    Cancel
+                </button>` : ""}
+                <span class="text-muted group-hover:text-ink transition">${icon("chevronRight", "size-5")}</span>
             </div>
-        </div>
-    `);
-
-    $('edit-appointment').addEventListener('click', () => {
-        openAppointmentForm(appointment);
-    });
-
-    $('update-appointment-status').addEventListener(
-        'click',
-        async () => {
-            const status = $('appointment-detail-status').value;
-
-            await updateAppointmentStatus(
-                appointment.appointment_id,
-                status
-            );
-        }
-    );
-
-    $('cancel-appointment').addEventListener(
-        'click',
-        async () => {
-            const confirmed = window.confirm(
-                'Are you sure you want to cancel this appointment?'
-            );
-
-            if (!confirmed) return;
-
-            await updateAppointmentStatus(
-                appointment.appointment_id,
-                'cancelled'
-            );
-        }
-    );
+        </article>`;
 }
 
-/* =========================================================
-   UPDATE APPOINTMENT STATUS
-   ========================================================= */
+function renderList() {
+    const list = listedAppointments();
 
-async function updateAppointmentStatus(appointmentId, status) {
-    if (!Object.hasOwn(STATUS_LABELS, status)) {
-        showError('Invalid appointment status.');
+    if (!list.length) {
+        const message = state.status
+            ? `No ${STATUS[state.status].label.toLowerCase()} appointments here.`
+            : state.tab === "upcoming"
+                ? "Nothing coming up in this period."
+                : "No appointments in this period.";
+
+        $("appointment-list").innerHTML = `
+            <div class="border border-dashed border-line-strong rounded-xl p-10 text-center space-y-2">
+                <p class="text-sm font-semibold">${message}</p>
+                <p class="text-xs text-muted">Try another tab or period, or book a new appointment.</p>
+            </div>`;
         return;
     }
 
-    const { error } = await supabase
-        .from('appointments')
-        .update({ status })
-        .eq('appointment_id', appointmentId);
+    $("appointment-list").innerHTML = list.map(card).join("");
+}
 
-    if (error) {
-        showError(error.message);
-        renderPage();
-        return;
+// ---------- calendar view ----------
+function renderCalendar() {
+    const [start, end] = periodBounds();
+
+    // month view starts on the sunday before the 1st and always shows 6 weeks
+    let first = start;
+    let days = Math.round((end - start) / 86400000);
+    if (state.range === "month") {
+        first = addDays(start, -start.getDay());
+        days = 42;
     }
 
-    closeModal();
-    showToast('Appointment status updated');
+    const today = new Date();
+    const visible = state.appointments.filter((a) => !state.status || a.status === state.status);
+    const tall = state.range !== "month";
+    const columns = state.range === "day" ? "grid-cols-1" : "grid-cols-7";
 
-    await loadAppointments();
-}
+    let html = `<div class="card overflow-hidden"><div class="grid ${columns} gap-px bg-line">`;
 
-/* =========================================================
-   REMINDER TOGGLE
-   ========================================================= */
-
-async function toggleAppointmentReminder(appointment) {
-    const newValue = appointment.reminder_enabled === false;
-
-    const { error } = await supabase
-        .from('appointments')
-        .update({
-            reminder_enabled: newValue
-        })
-        .eq('appointment_id', appointment.appointment_id);
-
-    if (error) {
-        showError(error.message);
-        renderPage();
-        return;
-    }
-
-    appointment.reminder_enabled = newValue;
-
-    showToast(
-        newValue
-            ? 'Appointment reminder enabled'
-            : 'Appointment reminder disabled'
-    );
-
-    renderPage();
-}
-
-/* =========================================================
-   VIEW CONTROLS
-   ========================================================= */
-
-function updateViewButtons() {
-    $('calendar-view').classList.toggle(
-        'active',
-        state.view === 'calendar'
-    );
-
-    $('list-view').classList.toggle(
-        'active',
-        state.view === 'list'
-    );
-
-    $('today').classList.toggle(
-        'active',
-        state.dateRange === 'today'
-    );
-
-    $('week').classList.toggle(
-        'active',
-        state.dateRange === 'week'
-    );
-
-    $('month').classList.toggle(
-        'active',
-        state.dateRange === 'month'
-    );
-
-    $('appointment-list').classList.toggle(
-        'hidden',
-        state.view !== 'list'
-    );
-
-    $('appointment-calendar').classList.toggle(
-        'hidden',
-        state.view !== 'calendar'
-    );
-}
-
-/* =========================================================
-   RENDER PAGE
-   ========================================================= */
-
-function renderPage() {
-    renderStatistics();
-    renderPeriod();
-    renderLegend();
-    updateFilterButtons();
-    updateViewButtons();
-
-    if (state.view === 'calendar') {
-        renderCalendar();
+    if (state.range === "day") {
+        html += `<div class="bg-table-head px-3 py-2.5 text-[11px] font-bold uppercase tracking-wider text-muted">
+            ${state.cursor.toLocaleDateString("en-US", { weekday: "long" })}</div>`;
     } else {
-        renderAppointmentList();
+        html += WEEKDAYS.map((d) => `<div class="bg-table-head px-2 py-2.5 text-center text-[11px] font-bold uppercase tracking-wider text-muted">${d}</div>`).join("");
     }
+
+    for (let i = 0; i < days; i++) {
+        const day = addDays(first, i);
+        const outside = state.range === "month" && day.getMonth() !== state.cursor.getMonth();
+        const isToday = sameDay(day, today);
+
+        const dayAppointments = visible
+            .filter((a) => sameDay(new Date(a.appointment_datetime), day))
+            .sort((a, b) => new Date(a.appointment_datetime) - new Date(b.appointment_datetime));
+
+        const limit = tall ? dayAppointments.length : MAX_EVENTS_PER_DAY;
+        const shown = dayAppointments.slice(0, limit);
+        const extra = dayAppointments.length - shown.length;
+
+        html += `
+            <div data-day="${day.toLocaleDateString("en-CA")}" tabindex="0" role="button"
+                aria-label="Show ${day.toLocaleDateString("en-US", { month: "long", day: "numeric" })}"
+                class="${tall ? "min-h-64" : "min-h-28"} p-2 flex flex-col gap-1 cursor-pointer transition focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent
+                       ${isToday ? "bg-accent/5 hover:bg-accent/10" : "bg-surface hover:bg-raised"} ${outside ? "opacity-40" : ""}">
+                <span class="size-6 rounded-full flex items-center justify-center text-xs font-semibold
+                    ${isToday ? "bg-accent text-neutral-950" : "text-ink"}">${day.getDate()}</span>
+                ${shown.map((a) => `
+                    <button type="button" data-open="${a.appointment_id}"
+                        class="w-full text-left truncate rounded px-1.5 py-1 text-[10px] font-semibold cursor-pointer hover:brightness-125 ${STATUS[a.status]?.badge ?? "bg-raised text-muted"}">
+                        ${formatTime(a.appointment_datetime)} · ${escapeHtml(a.customers?.full_name ?? "Appointment")}
+                    </button>`).join("")}
+                ${extra > 0 ? `<span class="px-1.5 text-[10px] font-semibold text-muted">+${extra} more</span>` : ""}
+            </div>`;
+    }
+
+    html += "</div></div>";
+    $("appointment-calendar").innerHTML = html;
 }
 
-/* =========================================================
-   EVENT LISTENERS
-   ========================================================= */
+// ---------- page ----------
+function render() {
+    renderCounts();
+    renderPeriod();
+    renderControls();
+    renderLegend();
+    if (state.view === "list") renderList();
+    else renderCalendar();
+}
 
-function setupEventListeners() {
-    $('new-appointment').addEventListener('click', () => {
-    openQuickAddModal('appointment');
+function movePeriod(step) {
+    const c = state.cursor;
+    if (state.range === "day") state.cursor = addDays(c, step);
+    else if (state.range === "week") state.cursor = addDays(c, step * 7);
+    else state.cursor = new Date(c.getFullYear(), c.getMonth() + step, 1);
+    render();
+}
+
+// clicking a day in the calendar lists just that day
+function showDay(isoDate) {
+    const [y, m, d] = isoDate.split("-").map(Number);
+    state.cursor = new Date(y, m - 1, d);
+    state.range = "day";
+    state.view = "list";
+    state.tab = "all";
+    render();
+}
+
+function openDrawer(id) {
+    const appointment = findAppointment(id);
+    if (appointment) openAppointmentDrawer(appointment);
+}
+
+function setupEvents() {
+    $("new-appointment").addEventListener("click", () => openNewAppointment());
+
+    document.querySelectorAll(".view-btn").forEach((btn) =>
+        btn.addEventListener("click", () => {
+            state.view = btn.dataset.view;
+            // the calendar has no single-day grid worth showing, so go back to the week
+            if (state.view === "calendar" && state.range === "day") state.range = "week";
+            render();
+        }),
+    );
+
+    document.querySelectorAll(".range-btn").forEach((btn) =>
+        btn.addEventListener("click", () => {
+            state.range = btn.dataset.range;
+            render();
+        }),
+    );
+
+    document.querySelectorAll(".tab-btn").forEach((btn) =>
+        btn.addEventListener("click", () => {
+            state.tab = btn.dataset.tab;
+            render();
+        }),
+    );
+
+    $("today").addEventListener("click", () => {
+        state.cursor = startOfDay(new Date());
+        render();
+    });
+    $("previous").addEventListener("click", () => movePeriod(-1));
+    $("next").addEventListener("click", () => movePeriod(1));
+
+    $("legend").addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-status]");
+        if (!btn) return;
+        state.status = state.status === btn.dataset.status ? null : btn.dataset.status;
+        render();
     });
 
-    // Calendar / List
-    $('calendar-view').addEventListener('click', () => {
-        state.view = 'calendar';
-        renderPage();
+    // list: the quick action buttons first, otherwise the card opens the drawer
+    $("appointment-list").addEventListener("click", async (e) => {
+        const action = e.target.closest("[data-action]");
+        if (action) {
+            e.stopPropagation();
+            const appointment = findAppointment(action.dataset.id);
+            if (!appointment || action.disabled) return;
+            action.disabled = true;
+            if (action.dataset.action === "reminder") await toggleReminder(appointment);
+            if (action.dataset.action === "cancel") await setStatus(appointment, "cancelled");
+            action.disabled = false;
+            return;
+        }
+        const cardEl = e.target.closest("[data-open]");
+        if (cardEl) openDrawer(cardEl.dataset.open);
     });
 
-    $('list-view').addEventListener('click', () => {
-        state.view = 'list';
-        renderPage();
+    // calendar: an appointment opens the drawer, anywhere else in the cell lists that day
+    $("appointment-calendar").addEventListener("click", (e) => {
+        const event = e.target.closest("[data-open]");
+        if (event) return openDrawer(event.dataset.open);
+        const day = e.target.closest("[data-day]");
+        if (day) showDay(day.dataset.day);
     });
 
-    // Today / Week / Month
-    $('today').addEventListener('click', () => {
-        state.currentDate = new Date();
-        state.dateRange = 'today';
-        state.selectedDate = null;
-        renderPage();
-    });
-
-    $('week').addEventListener('click', () => {
-        state.dateRange = 'week';
-        state.selectedDate = null;
-        renderPage();
-    });
-
-    $('month').addEventListener('click', () => {
-        state.dateRange = 'month';
-        state.selectedDate = null;
-        renderPage();
-    });
-
-    // Previous / Next
-    $('previous').addEventListener('click', () => {
-        changePeriod(-1);
-    });
-
-    $('next').addEventListener('click', () => {
-        changePeriod(1);
-    });
-
-    // Upcoming / Past / All
-    document.querySelectorAll('[data-filter]').forEach((button) => {
-        button.addEventListener('click', () => {
-            state.filter = button.dataset.filter;
-            renderPage();
-        });
-    });
-
-    // Close modal with Escape
-    document.addEventListener('keydown', (event) => {
-        if (
-            event.key === 'Escape' &&
-            $('appointment-dialog-root').children.length
-        ) {
-            closeModal();
+    // enter or space on a focused card or calendar day
+    document.querySelector("main").addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        const target = e.target;
+        if (target.matches("article[data-open]")) {
+            e.preventDefault();
+            openDrawer(target.dataset.open);
+        } else if (target.matches("[data-day]")) {
+            e.preventDefault();
+            showDay(target.dataset.day);
         }
     });
 }
 
-/* =========================================================
-   INITIALIZE
-   ========================================================= */
+// links from other pages:
+//   ?appointment=<id>                opens that appointment (dashboard)
+//   ?new=1&customer=<id>             opens the new appointment box for that customer (customer details)
+function handleLinks() {
+    const params = new URLSearchParams(window.location.search);
+
+    const id = params.get("appointment");
+    const linked = id && findAppointment(id);
+    if (linked) {
+        state.cursor = startOfDay(new Date(linked.appointment_datetime));
+        state.tab = "all";
+        render();
+        openAppointmentDrawer(linked);
+    }
+
+    if (["1", "true"].includes(params.get("new"))) {
+        openNewAppointment({ customerId: params.get("customer") });
+    }
+
+    // tidy the address bar so a refresh doesn't open things again
+    if (params.size) history.replaceState(null, "", window.location.pathname);
+}
 
 async function init() {
-    try {
-        const session = await initPage({
-            active: 'appointments'
-        });
+    const session = await initPage({ active: "appointments" });
+    if (!session) return;
+    state.userId = session.user.id;
 
-        if (!session) return;
+    initAppointmentDrawer({
+        onStatus: setStatus,
+        onEdit: (a) => openEditAppointment(a),
+        onReschedule: (a) => openRescheduleAppointment(a),
+        // escape closes the box on top first, not the drawer behind it
+        isCovered: () => isAppointmentModalOpen() || isConfirmOpen(),
+    });
 
-        state.userId = session.user.id;
-
-        initQuickAddModal({
-            userId: state.userId,
-            onCreated: async (type) => {
-                if (type === 'appointment') {
-                    await loadAppointments();
-                }
+    initAppointmentModals({
+        userId: state.userId,
+        getAppointments: () => state.appointments,
+        onSaved: async ({ appointmentId, closeDrawer }) => {
+            if (closeDrawer && isAppointmentDrawerOpen()) closeAppointmentDrawer();
+            await loadAppointments();
+            // jump to the saved appointment's period so it's on screen
+            const saved = appointmentId && findAppointment(appointmentId);
+            if (saved && !inPeriod(saved)) {
+                state.cursor = startOfDay(new Date(saved.appointment_datetime));
+                render();
             }
-        });
+        },
+    });
 
-        installLegendStyles();
-        setupEventListeners();
-
-        await loadAppointments();
-
-        // Automatically open your form from the dashboard
-        const params = new URLSearchParams(window.location.search);
-
-        if (params.get('new') === 'true') {
-            await openQuickAddModal('appointment');
-        }
-    } catch (error) {
-        console.error('Appointments initialization failed:', error);
-
-        showError(
-            error.message || 'Unable to initialize appointments page.'
-        );
-    }
+    setupEvents();
+    render();
+    await loadAppointments();
+    handleLinks();
 }
 
 init();

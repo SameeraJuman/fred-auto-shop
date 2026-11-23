@@ -390,11 +390,22 @@ export function initQuickAddModal({ userId, onCreated = () => {} } = {}) {
 
     // picking a customer loads their vehicles and fills in their phone number
     root.addEventListener("change", (e) => {
-        if (e.target.id !== "qa-reminder-enabled") return;
+        if (e.target.id === "qa-customer") {
+            const customer = customers.find((c) => c.customer_id === e.target.value);
+            $("qa-contact").value = customer?.phone_number ?? "";
+            if (customer) loadVehicles(customer.customer_id);
+            else {
+                $("qa-vehicle").innerHTML = `<option value="">Select a customer first</option>`;
+                $("qa-vehicle").disabled = true;
+            }
+        }
 
-        const enabled = e.target.checked;
-        $("qa-reminder-time").disabled = !enabled;
-        $("qa-reminder-settings").classList.toggle("opacity-50", !enabled);
+        // turning the reminder off greys out the lead time
+        if (e.target.id === "qa-reminder-enabled") {
+            const enabled = e.target.checked;
+            $("qa-reminder-time").disabled = !enabled;
+            $("qa-reminder-settings").classList.toggle("opacity-50", !enabled);
+        }
     });
 
     $("quick-add-form").addEventListener("submit", save);
