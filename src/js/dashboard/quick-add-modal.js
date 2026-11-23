@@ -148,6 +148,33 @@ function appointmentFields() {
         <div>
             ${fieldLabel("qa-when", "Date and time", true)}
             <input id="qa-when" type="datetime-local" class="field" />
+        </div>
+
+        <div class="border-t border-line pt-4 space-y-3">
+            <label class="flex items-center justify-between gap-3 cursor-pointer">
+                <span class="flex items-center gap-2 text-sm font-semibold">
+                    <span>Appointment reminder</span>
+                </span>
+
+                <input
+                    id="qa-reminder-enabled"
+                    type="checkbox"
+                    class="size-4 accent-teal-500"
+                    checked
+                />
+            </label>
+
+            <div id="qa-reminder-settings">
+                ${fieldLabel("qa-reminder-time", "Remind before appointment")}
+
+                <select id="qa-reminder-time" class="field cursor-pointer">
+                    <option value="15">15 minutes before</option>
+                    <option value="30">30 minutes before</option>
+                    <option value="60" selected>1 hour before</option>
+                    <option value="120">2 hours before</option>
+                    <option value="1440">1 day before</option>
+                </select>
+            </div>
         </div>`;
 }
 
@@ -308,6 +335,10 @@ function buildRecord() {
         contact_number: value("qa-contact"),
         service_requested: value("qa-service"),
         appointment_datetime: when.toISOString(),
+
+        reminder_enabled: $("qa-reminder-enabled").checked,
+        reminder_lead_minutes: Number($("qa-reminder-time").value),
+
         created_by: options.userId,
     };
 }
@@ -359,14 +390,11 @@ export function initQuickAddModal({ userId, onCreated = () => {} } = {}) {
 
     // picking a customer loads their vehicles and fills in their phone number
     root.addEventListener("change", (e) => {
-        if (e.target.id !== "qa-customer") return;
-        const customer = customers.find((c) => c.customer_id === e.target.value);
-        $("qa-contact").value = customer?.phone_number ?? "";
-        if (customer) loadVehicles(customer.customer_id);
-        else {
-            $("qa-vehicle").innerHTML = `<option value="">Select a customer first</option>`;
-            $("qa-vehicle").disabled = true;
-        }
+        if (e.target.id !== "qa-reminder-enabled") return;
+
+        const enabled = e.target.checked;
+        $("qa-reminder-time").disabled = !enabled;
+        $("qa-reminder-settings").classList.toggle("opacity-50", !enabled);
     });
 
     $("quick-add-form").addEventListener("submit", save);

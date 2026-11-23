@@ -1,6 +1,10 @@
 import { supabase } from '../lib/supabase.js';
 import { initPage } from '../shared/page.js';
 import { showToast } from '../shared/toast.js';
+import {
+    initQuickAddModal,
+    openQuickAddModal
+} from '../dashboard/quick-add-modal.js';
 
 /* =========================================================
    APPOINTMENTS PAGE — FRED'S AUTO ELECTRICAL
@@ -845,6 +849,7 @@ function installLegendStyles() {
    NEW / EDIT APPOINTMENT FORM
    ========================================================= */
 
+
 async function openAppointmentForm(appointment = null) {
     try {
         await loadFormData();
@@ -855,17 +860,9 @@ async function openAppointmentForm(appointment = null) {
 
     const editing = Boolean(appointment);
 
-    const title = editing
-        ? 'Edit Appointment'
-        : 'New Appointment';
-
-    const customerOptions = state.customers.map((customer) => `
-        <option
-            value="${customer.customer_id}"
-            ${appointment?.customer_id === customer.customer_id
-                ? 'selected'
-                : ''}
-        >
+    const customerOptions = state.customers.map(customer => `
+        <option value="${customer.customer_id}"
+            ${appointment?.customer_id === customer.customer_id ? 'selected' : ''}>
             ${escapeHtml(customer.full_name)}
         </option>
     `).join('');
@@ -876,189 +873,106 @@ async function openAppointmentForm(appointment = null) {
         [60, '1 hour before'],
         [120, '2 hours before'],
         [1440, '1 day before']
-    ].map(([value, label]) => `
-        <option
-            value="${value}"
-            ${Number(appointment?.reminder_lead_minutes ?? 60) === value
-                ? 'selected'
-                : ''}
-        >
+    ].map(([minutes, label]) => `
+        <option value="${minutes}"
+            ${Number(appointment?.reminder_lead_minutes ?? 60) === minutes ? 'selected' : ''}>
             ${label}
         </option>
     `).join('');
 
-    openModal(`
-        <div class="appointment-modal-overlay">
-            <div
-                class="appointment-modal"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="appointment-modal-title"
-            >
-                <div class="appointment-modal-header">
-                    <h2
-                        id="appointment-modal-title"
-                        class="appointment-modal-title"
-                    >
-                        ${title}
-                    </h2>
+    const fieldLabel = (id, label, required = false) => `
+        <label for="${id}"
+            class="block text-[11px] font-semibold uppercase tracking-wider text-muted font-display mb-1.5">
+            ${label}${required ? ' <span class="text-status-overdue">*</span>' : ''}
+        </label>
+    `;
 
-                    <button
-                        type="button"
-                        data-close-modal
-                        class="btn btn-secondary"
-                        aria-label="Close"
-                    >
+    openModal(`
+        <div class="appointment-modal-overlay fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] overflow-y-auto p-4 flex">
+            <div class="m-auto w-full max-w-lg bg-app border border-line rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]"
+                role="dialog" aria-modal="true"
+                aria-labelledby="appointment-modal-title">
+
+                <header class="px-6 py-4 border-b border-line bg-surface flex items-center justify-between gap-3 shrink-0">
+                    <div class="flex items-center gap-3">
+                        <div class="size-9 rounded-lg bg-accent/15 text-accent border border-accent/30 flex items-center justify-center">
+                            <svg class="size-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                <path d="M17 12h-5v5h5v-5zM16 1v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-1V1h-2zm3 18H5V8h14v11z"/>
+                            </svg>
+                        </div>
+                        <h2 id="appointment-modal-title"
+                            class="font-display text-base uppercase font-bold tracking-wider">
+                            ${editing ? 'Reschedule Appointment' : 'New Appointment'}
+                        </h2>
+                    </div>
+
+                    <button type="button" data-close-modal
+                        class="size-8 rounded-lg bg-raised hover:bg-line-strong text-muted hover:text-ink flex items-center justify-center transition cursor-pointer"
+                        aria-label="Close">
                         &times;
                     </button>
-                </div>
+                </header>
 
-                <form id="appointment-form">
-                    <div class="appointment-modal-body">
-                        <div class="appointment-form">
+                <form id="appointment-form" class="flex flex-col min-h-0" novalidate>
+                    <div class="flex-1 overflow-y-auto p-6 flex flex-col gap-5">
 
-                            <div class="appointment-form-group full-width">
-                                <label
-                                    class="appointment-form-label"
-                                    for="appointment-customer"
-                                >
-                                    Customer *
-                                </label>
-
-                                <select
-                                    id="appointment-customer"
-                                    name="customer_id"
-                                    class="field"
-                                    required
-                                >
-                                    <option value="">
-                                        Select customer
-                                    </option>
-
-                                    ${customerOptions}
-                                </select>
-                            </div>
-
-                            <div class="appointment-form-group full-width">
-                                <label
-                                    class="appointment-form-label"
-                                    for="appointment-vehicle"
-                                >
-                                    Vehicle
-                                </label>
-
-                                <select
-                                    id="appointment-vehicle"
-                                    name="vehicle_id"
-                                    class="field"
-                                >
-                                    <option value="">
-                                        No vehicle selected
-                                    </option>
-                                </select>
-                            </div>
-
-                            <div class="appointment-form-group full-width">
-                                <label
-                                    class="appointment-form-label"
-                                    for="appointment-contact"
-                                >
-                                    Contact Number *
-                                </label>
-
-                                <input
-                                    id="appointment-contact"
-                                    name="contact_number"
-                                    type="tel"
-                                    maxlength="20"
-                                    class="field"
-                                    required
-                                    value="${escapeHtml(
-                                        appointment?.contact_number || ''
-                                    )}"
-                                />
-                            </div>
-
-                            <div class="appointment-form-group full-width">
-                                <label
-                                    class="appointment-form-label"
-                                    for="appointment-service"
-                                >
-                                    Service Requested *
-                                </label>
-
-                                <input
-                                    id="appointment-service"
-                                    name="service_requested"
-                                    type="text"
-                                    maxlength="255"
-                                    class="field"
-                                    required
-                                    value="${escapeHtml(
-                                        appointment?.service_requested || ''
-                                    )}"
-                                />
-                            </div>
-
-                            <div class="appointment-form-group full-width">
-                                <label
-                                    class="appointment-form-label"
-                                    for="appointment-datetime"
-                                >
-                                    Appointment Date & Time *
-                                </label>
-
-                                <input
-                                    id="appointment-datetime"
-                                    name="appointment_datetime"
-                                    type="datetime-local"
-                                    class="field"
-                                    required
-                                    value="${editing
-                                        ? getLocalDateTime(
-                                            appointment.appointment_datetime
-                                        )
-                                        : ''}"
-                                />
-                            </div>
-
-                            <div class="appointment-form-group full-width">
-                                <label
-                                    class="appointment-form-label"
-                                    for="appointment-reminder"
-                                >
-                                    Reminder
-                                </label>
-
-                                <select
-                                    id="appointment-reminder"
-                                    name="reminder_lead_minutes"
-                                    class="field"
-                                >
-                                    ${reminderOptions}
-                                </select>
-                            </div>
-
+                        <div>
+                            ${fieldLabel('appointment-customer', 'Customer', true)}
+                            <select id="appointment-customer" name="customer_id" class="field cursor-pointer" required>
+                                <option value="">Select customer</option>
+                                ${customerOptions}
+                            </select>
                         </div>
+
+                        <div>
+                            ${fieldLabel('appointment-vehicle', 'Vehicle')}
+                            <select id="appointment-vehicle" name="vehicle_id" class="field cursor-pointer">
+                                <option value="">Select a customer first</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            ${fieldLabel('appointment-contact', 'Contact number', true)}
+                            <input id="appointment-contact" name="contact_number"
+                                type="tel" maxlength="20" class="field"
+                                placeholder="Filled in from the customer"
+                                value="${escapeHtml(appointment?.contact_number || '')}" required />
+                        </div>
+
+                        <div>
+                            ${fieldLabel('appointment-service', 'Service requested', true)}
+                            <input id="appointment-service" name="service_requested"
+                                type="text" maxlength="255" class="field"
+                                placeholder="e.g. Alternator not charging"
+                                value="${escapeHtml(appointment?.service_requested || '')}" required />
+                        </div>
+
+                        <div>
+                            ${fieldLabel('appointment-datetime', 'Date and time', true)}
+                            <input id="appointment-datetime" name="appointment_datetime"
+                                type="datetime-local" class="field"
+                                value="${editing ? getLocalDateTime(appointment.appointment_datetime) : ''}"
+                                required />
+                        </div>
+
+                        <div>
+                            ${fieldLabel('appointment-reminder', 'Reminder')}
+                            <select id="appointment-reminder" name="reminder_lead_minutes"
+                                class="field cursor-pointer">
+                                ${reminderOptions}
+                            </select>
+                        </div>
+
                     </div>
 
-                    <div class="appointment-modal-footer">
-                        <button
-                            type="button"
-                            data-close-modal
-                            class="btn btn-secondary"
-                        >
+                    <footer class="px-6 py-4 border-t border-line bg-surface flex flex-wrap items-center justify-end gap-2 shrink-0">
+                        <button type="button" data-close-modal class="btn btn-secondary">
                             Cancel
                         </button>
-
-                        <button
-                            type="submit"
-                            id="save-appointment"
-                            class="btn btn-primary"
-                        >
-                            Save Appointment
+                        <button type="submit" id="save-appointment" class="btn btn-primary">
+                            ${editing ? 'Save Changes' : 'Save Appointment'}
                         </button>
-                    </div>
+                    </footer>
                 </form>
             </div>
         </div>
@@ -1071,35 +985,29 @@ async function openAppointmentForm(appointment = null) {
 
     function updateVehicleOptions() {
         const customerId = customerSelect.value;
-
         const vehicles = state.vehicles.filter(
-            (vehicle) => vehicle.customer_id === customerId
+            vehicle => vehicle.customer_id === customerId
         );
 
         vehicleSelect.innerHTML = `
-            <option value="">No vehicle selected</option>
-
-            ${vehicles.map((vehicle) => `
-                <option
-                    value="${vehicle.vehicle_id}"
-                    ${appointment?.vehicle_id === vehicle.vehicle_id
-                        ? 'selected'
-                        : ''}
-                >
+            <option value="">${vehicles.length ? 'Not specified yet' : 'No vehicles on file'}</option>
+            ${vehicles.map(vehicle => `
+                <option value="${vehicle.vehicle_id}"
+                    ${appointment?.vehicle_id === vehicle.vehicle_id ? 'selected' : ''}>
                     ${escapeHtml(getVehicleName(vehicle))}
-                    ${vehicle.plate_number
-                        ? ` - ${escapeHtml(vehicle.plate_number)}`
-                        : ''}
+                    ${vehicle.plate_number ? ` (${escapeHtml(vehicle.plate_number)})` : ''}
                 </option>
             `).join('')}
         `;
+
+        vehicleSelect.disabled = !customerId || vehicles.length === 0;
     }
 
     customerSelect.addEventListener('change', () => {
         updateVehicleOptions();
 
         const customer = state.customers.find(
-            (item) => item.customer_id === customerSelect.value
+            item => item.customer_id === customerSelect.value
         );
 
         contactInput.value = customer?.phone_number || '';
@@ -1107,11 +1015,12 @@ async function openAppointmentForm(appointment = null) {
 
     updateVehicleOptions();
 
-    form.addEventListener('submit', async (event) => {
+    form.addEventListener('submit', async event => {
         event.preventDefault();
         await saveAppointment(form, appointment);
     });
 }
+
 
 /* =========================================================
    SAVE APPOINTMENT
@@ -1522,7 +1431,7 @@ function renderPage() {
 
 function setupEventListeners() {
     $('new-appointment').addEventListener('click', () => {
-        openAppointmentForm();
+    openQuickAddModal('appointment');
     });
 
     // Calendar / List
@@ -1598,6 +1507,15 @@ async function init() {
 
         state.userId = session.user.id;
 
+        initQuickAddModal({
+            userId: state.userId,
+            onCreated: async (type) => {
+                if (type === 'appointment') {
+                    await loadAppointments();
+                }
+            }
+        });
+
         installLegendStyles();
         setupEventListeners();
 
@@ -1607,7 +1525,7 @@ async function init() {
         const params = new URLSearchParams(window.location.search);
 
         if (params.get('new') === 'true') {
-            await openAppointmentForm();
+            await openQuickAddModal('appointment');
         }
     } catch (error) {
         console.error('Appointments initialization failed:', error);

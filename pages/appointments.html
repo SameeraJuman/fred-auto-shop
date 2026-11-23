@@ -1,0 +1,145 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Appointments - Fred's Auto Electrical</title>
+    <link rel="stylesheet" href="/src/css/main.css" />
+    <link rel="stylesheet" href="/src/css/appointments.css" />
+</head>
+<body>
+    <!-- the sidebar and top bar are added by src/js/shared/page.js -->
+
+    <div class="flex flex-col">
+
+        <main class="flex-1 p-6 space-y-8 max-w-7xl w-full">
+
+            <!-- page header and actions -->
+            <header class="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <h1 class="font-display text-3xl font-bold tracking-wider uppercase">
+                        Appointments
+                    </h1>
+                    <p class="mt-2 text-sm text-muted">
+                        <span id="total-count">0</span> total
+                        <span class="mx-1">·</span>
+                        <span id="today-count" class="text-accent">
+                            0 scheduled today
+                        </span>
+                    </p>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2">
+                    <button id="calendar-view"
+                        class="btn bg-surface hover:bg-raised border border-line-strong px-4 py-2 text-xs">
+                        Calendar
+                    </button>
+
+                    <button id="list-view"
+                        class="btn bg-surface hover:bg-raised border border-line-strong px-4 py-2 text-xs">
+                        List View
+                    </button>
+
+                    <button id="new-appointment"
+                        class="btn btn-primary text-xs">
+                        + New Appointment
+                    </button>
+                </div>
+            </header>
+
+            <!-- date navigation and calendar controls -->
+            <section class="card rounded-xl p-5 space-y-5">
+
+                <div class="flex flex-wrap items-center justify-between gap-4">
+
+                    <div class="flex items-center gap-3">
+                        <button id="previous"
+                            class="btn bg-surface hover:bg-raised border border-line-strong px-3 py-2 text-xs"
+                            aria-label="Previous period">
+                            &lsaquo;
+                        </button>
+
+                        <button id="next"
+                            class="btn bg-surface hover:bg-raised border border-line-strong px-3 py-2 text-xs"
+                            aria-label="Next period">
+                            &rsaquo;
+                        </button>
+
+                        <h2 id="period"
+                            class="font-display text-sm font-bold tracking-wider">
+                        </h2>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button id="today"
+                            class="btn bg-surface hover:bg-raised border border-line-strong px-4 py-2 text-xs">
+                            Today
+                        </button>
+
+                        <button id="month"
+                            class="btn bg-surface hover:bg-raised border border-line-strong px-4 py-2 text-xs">
+                            Month
+                        </button>
+
+                        <button id="week"
+                            class="btn bg-surface hover:bg-raised border border-line-strong px-4 py-2 text-xs">
+                            Week
+                        </button>
+                    </div>
+                </div>
+
+                <!-- appointment status legend -->
+                <div id="legend"
+                    class="flex flex-wrap items-center gap-4 text-xs text-muted">
+                </div>
+
+            </section>
+
+            <!-- appointment filters -->
+            <section>
+                <nav aria-label="Appointment filters"
+                    class="flex flex-wrap items-center gap-6 border-b border-line">
+
+                    <button data-filter="upcoming"
+                        class="pb-3 text-sm font-semibold text-accent hover:text-accent transition">
+                        Upcoming
+                    </button>
+
+                    <button data-filter="past"
+                        class="pb-3 text-sm font-semibold text-muted hover:text-ink transition">
+                        Past
+                    </button>
+
+                    <button data-filter="all"
+                        class="pb-3 text-sm font-semibold text-muted hover:text-ink transition">
+                        All
+                    </button>
+                </nav>
+            </section>
+
+            <!-- appointment list view -->
+            <section id="appointment-list"
+                class="space-y-4"
+                aria-live="polite">
+            </section>
+
+            <!-- appointment calendar view -->
+            <section id="appointment-calendar"
+                class="card rounded-xl p-6 hidden">
+            </section>
+
+        </main>
+    </div>
+
+    <!-- appointment modal container -->
+    <div id="appointment-dialog-root"></div>
+
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+
+    <!-- appointment page JavaScript -->
+    <script type="module"
+        src="/src/js/appointments/appointments.js"></script>
+
+</body>
+</html>
