@@ -36,10 +36,13 @@ function shell() {
                 </button>
             </header>
 
-            <!-- filled by renderBody() -->
-            <div id="ad-body" class="flex-1 overflow-y-auto p-4 space-y-3"></div>
-
-            <footer id="ad-footer" class="p-4 border-t border-line bg-surface space-y-2 shrink-0"></footer>
+            <!-- the details and the buttons scroll together; when there's room, the buttons sit at the very bottom -->
+            <div class="flex-1 min-h-0 overflow-y-auto">
+                <div class="min-h-full flex flex-col">
+                    <div id="ad-body" class="p-4 space-y-3"></div>
+                    <footer id="ad-footer" class="mt-auto px-4 pb-4 space-y-2"></footer>
+                </div>
+            </div>
         </aside>
     </div>`;
 }
