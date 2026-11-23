@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Appointments - Fred's Auto Electrical</title>
+    <link rel="stylesheet" href="/src/css/main.css" />
+</head>
+<body>
+    <!-- the sidebar and top bar are added by src/js/shared/page.js -->
+
+    <div class="flex flex-col">
+
+    <main class="flex-1 p-6 space-y-5">
+
+        <!-- page heading: counts on the left, view toggle and new appointment on the right -->
+        <div class="flex flex-wrap items-start justify-between gap-4">
+            <div>
+                <h1 class="font-display text-3xl font-bold tracking-wider">APPOINTMENTS</h1>
+                <p class="text-sm text-muted mt-1">
+                    <span id="total-count">0</span> total
+                    <span class="mx-1">·</span>
+                    <span id="range-count" class="text-accent">0 scheduled this month</span>
+                </p>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3">
+                <!-- calendar / list toggle (the script highlights the selected one) -->
+                <div class="flex bg-surface border border-line-strong rounded-lg p-1 text-xs font-semibold" role="group" aria-label="Appointment view">
+                    <button id="calendar-view" type="button" data-view="calendar" class="view-btn flex items-center gap-1.5 px-3 py-1.5 rounded-md transition cursor-pointer">
+                        <svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zM9 14H7v-2h2v2zm4 0h-2v-2h2v2zm4 0h-2v-2h2v2zm-8 4H7v-2h2v2zm4 0h-2v-2h2v2zm4 0h-2v-2h2v2z"/></svg>
+                        Calendar
+                    </button>
+                    <button id="list-view" type="button" data-view="list" class="view-btn flex items-center gap-1.5 px-3 py-1.5 rounded-md transition cursor-pointer">
+                        <svg class="size-4 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>
+                        List View
+                    </button>
+                </div>
+
+                <button id="new-appointment" type="button" class="btn btn-primary">
+                    <svg class="size-5 shrink-0" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                    New Appointment
+                </button>
+            </div>
+        </div>
+
+        <!-- period navigation and status filters -->
+        <section class="card p-4 space-y-4">
+            <div class="flex flex-wrap items-center gap-3">
+                <div class="flex items-center gap-1.5">
+                    <button id="previous" type="button" class="size-8 rounded-lg bg-raised hover:bg-line-strong text-muted hover:text-ink flex items-center justify-center transition cursor-pointer" aria-label="Previous period">
+                        <svg class="size-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+                    </button>
+                    <button id="next" type="button" class="size-8 rounded-lg bg-raised hover:bg-line-strong text-muted hover:text-ink flex items-center justify-center transition cursor-pointer" aria-label="Next period">
+                        <svg class="size-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"/></svg>
+                    </button>
+                </div>
+
+                <h2 id="period" class="font-display text-base font-bold tracking-wide min-w-36"></h2>
+
+                <button id="today" type="button" class="px-3 py-1.5 rounded-lg bg-accent/10 text-accent text-xs font-semibold hover:bg-accent/20 transition cursor-pointer">
+                    Today
+                </button>
+
+                <!-- month / week toggle -->
+                <div class="flex bg-app border border-line-strong rounded-lg p-1 text-xs font-semibold" role="group" aria-label="Period length">
+                    <button id="month" type="button" data-range="month" class="range-btn px-3 py-1 rounded-md transition cursor-pointer">Month</button>
+                    <button id="week" type="button" data-range="week" class="range-btn px-3 py-1 rounded-md transition cursor-pointer">Week</button>
+                </div>
+            </div>
+
+            <!-- status filters, built by the script (click one to show only that status, click again to clear) -->
+            <div id="legend" class="flex flex-wrap items-center gap-2" role="group" aria-label="Filter by status"></div>
+        </section>
+
+        <!-- upcoming / past / all tabs (list view only) -->
+        <nav id="tabs" aria-label="Appointment timing" class="flex items-center gap-6 border-b border-line">
+            <button type="button" data-tab="upcoming" class="tab-btn -mb-px pb-3 border-b-2 text-sm font-semibold transition cursor-pointer">Upcoming</button>
+            <button type="button" data-tab="past" class="tab-btn -mb-px pb-3 border-b-2 text-sm font-semibold transition cursor-pointer">Past</button>
+            <button type="button" data-tab="all" class="tab-btn -mb-px pb-3 border-b-2 text-sm font-semibold transition cursor-pointer">All</button>
+        </nav>
+
+        <!-- list view -->
+        <section id="appointment-list" class="space-y-3" aria-live="polite"></section>
+
+        <!-- calendar view -->
+        <section id="appointment-calendar" class="hidden"></section>
+    </main>
+    </div>
+
+    <script type="module" src="/src/js/appointments/appointments.js"></script>
+</body>
+</html>
