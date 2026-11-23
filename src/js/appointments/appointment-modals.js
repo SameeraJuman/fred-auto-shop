@@ -117,6 +117,34 @@ const reminderSelect = (selected) => `
         <select id="am-reminder" class="field cursor-pointer">${reminderOptionsHtml(selected)}</select>
     </div>`;
 
+// shown when "add new vehicle" is picked; the vehicle is saved for the customer together with the appointment
+const newVehiclePanel = () => `
+        <div id="am-new-vehicle" class="hidden rounded-xl border border-accent/30 bg-accent/5 p-3 space-y-3">
+            <p class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-accent">${icon("car", "size-4")}New vehicle</p>
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    ${label("am-new-make", "Make", { required: true })}
+                    <input id="am-new-make" type="text" maxlength="50" class="field" placeholder="e.g. Toyota" />
+                </div>
+                <div>
+                    ${label("am-new-model", "Model", { required: true })}
+                    <input id="am-new-model" type="text" maxlength="50" class="field" placeholder="e.g. Allion" />
+                </div>
+                <div>
+                    ${label("am-new-year", "Year", { required: true })}
+                    <input id="am-new-year" type="number" min="1900" max="2100" class="field font-mono" placeholder="e.g. 2015" />
+                </div>
+                <div>
+                    ${label("am-new-plate", "License plate", { required: true })}
+                    <input id="am-new-plate" type="text" maxlength="15" class="field font-mono uppercase" placeholder="e.g. PAA 1234" />
+                </div>
+            </div>
+            <div>
+                ${label("am-new-colour", "Colour")}
+                <input id="am-new-colour" type="text" maxlength="30" class="field" placeholder="e.g. Silver" />
+            </div>
+        </div>`;
+
 function newFields() {
     const customerOptions = customers
         .map((c) => `<option value="${c.customer_id}">${escapeHtml(c.full_name)}</option>`)
@@ -145,7 +173,12 @@ function newFields() {
                     <input id="am-new-phone" type="tel" maxlength="20" class="field" placeholder="592-600-1234" />
                 </div>
             </div>
-            <p class="text-[11px] text-muted">Email, address and vehicles can be added on the customer's page later.</p>
+            <p class="text-[11px] text-muted">Email and address can be added on the customer's page later.</p>
+        </div>
+
+        <div>
+            ${label("am-contact", "Contact number", { required: true })}
+            ${withIcon(`<input id="am-contact" type="tel" maxlength="20" class="field pr-9" placeholder="Filled in from the customer" />`, "phone")}
         </div>
 
         <div>
@@ -156,32 +189,7 @@ function newFields() {
             ${hint("am-vehicle-hint", "", "car")}
         </div>
 
-        <!-- shown when "add new vehicle" is picked; saved for the customer together with the appointment -->
-        <div id="am-new-vehicle" class="hidden rounded-xl border border-accent/30 bg-accent/5 p-3 space-y-3">
-            <p class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-accent">${icon("car", "size-4")}New vehicle</p>
-            <div class="grid grid-cols-2 gap-3">
-                <div>
-                    ${label("am-new-make", "Make", { required: true })}
-                    <input id="am-new-make" type="text" maxlength="50" class="field" placeholder="e.g. Toyota" />
-                </div>
-                <div>
-                    ${label("am-new-model", "Model", { required: true })}
-                    <input id="am-new-model" type="text" maxlength="50" class="field" placeholder="e.g. Allion" />
-                </div>
-                <div>
-                    ${label("am-new-year", "Year", { required: true })}
-                    <input id="am-new-year" type="number" min="1900" max="2100" class="field font-mono" placeholder="e.g. 2015" />
-                </div>
-                <div>
-                    ${label("am-new-plate", "License plate", { required: true })}
-                    <input id="am-new-plate" type="text" maxlength="15" class="field font-mono uppercase" placeholder="e.g. PAA 1234" />
-                </div>
-            </div>
-            <div>
-                ${label("am-new-colour", "Colour")}
-                <input id="am-new-colour" type="text" maxlength="30" class="field" placeholder="e.g. Silver" />
-            </div>
-        </div>
+        ${newVehiclePanel()}
 
         <div>
             ${label("am-service", "Service requested", { required: true })}
@@ -229,6 +237,8 @@ function editFields() {
                 <option value="">Loading vehicles...</option>
             </select>
         </div>
+
+        ${newVehiclePanel()}
 
         <div>
             ${label("am-service", "Service requested", { required: true })}
@@ -306,18 +316,28 @@ async function loadVehicles(customerId, selectedId = null) {
 
     select.innerHTML =
         `<option value="">${vehicles.length ? "Not sure yet" : "No vehicles on file"}</option>` +
-        (mode === "new" ? `<option value="${NEW_VEHICLE}">+ Add new vehicle</option>` : "") +
+        `<option value="${NEW_VEHICLE}">+ Add new vehicle</option>` +
         vehicles.map((v) => `<option value="${v.vehicle_id}" ${v.vehicle_id === selectedId ? "selected" : ""}>${escapeHtml(vehicleLabel(v))}</option>`).join("");
-    select.disabled = mode !== "new" && vehicles.length === 0;
+    select.disabled = false;
 
     if (mode === "edit") snapshotValue = snapshot(); // loading isn't a change
 }
 
 // ---------- new appointment: customer picker ----------
+// the contact number copies the customer's phone until staff type a different one
+let autoContact = "";
+function fillContact(phone) {
+    const input = $("am-contact");
+    if (input.value.trim() === autoContact) input.value = phone;
+    autoContact = phone;
+}
+
 async function onCustomerChange() {
     const value = $("am-customer").value;
     const isNew = value === NEW_CUSTOMER;
     const customer = customers.find((c) => c.customer_id === value);
+
+    fillContact(customer?.phone_number ?? (isNew ? $("am-new-phone").value.trim() : ""));
 
     $("am-new-customer").classList.toggle("hidden", !isNew);
     $("am-vehicle-right").textContent = customer ? "Customer linked" : "";
@@ -436,6 +456,7 @@ export async function openNewAppointment({ customerId = null } = {}) {
     }
 
     appointment = null;
+    autoContact = "";
     render("new");
 
     // coming from a customer's page, so pick them already
@@ -477,6 +498,48 @@ function readWhen() {
     return when;
 }
 
+// the new vehicle fields, checked with the same rules as the vehicles table
+// returns null when "add new vehicle" isn't picked, false (with a message shown) when something's wrong
+function readNewVehicle() {
+    if ($("am-vehicle").value !== NEW_VEHICLE) return null;
+    const value = (id) => $(id).value.trim();
+    const year = Number(value("am-new-year"));
+    if (!value("am-new-make")) return fail("Enter the vehicle's make.") ?? false;
+    if (!value("am-new-model")) return fail("Enter the vehicle's model.") ?? false;
+    if (!Number.isInteger(year) || year < 1900 || year > 2100) return fail("Enter a year between 1900 and 2100.") ?? false;
+    if (!value("am-new-plate")) return fail("Enter the license plate.") ?? false;
+    return {
+        make: value("am-new-make"),
+        model: value("am-new-model"),
+        year,
+        plate_number: value("am-new-plate").toUpperCase(),
+        colour: value("am-new-colour") || null,
+    };
+}
+
+// saves a new vehicle for a customer and returns its id, or null with a message shown
+async function saveNewVehicle(vehicle, customerId) {
+    const { data, error } = await supabase
+        .from("vehicles")
+        .insert({ ...vehicle, customer_id: customerId })
+        .select("vehicle_id, customer_id, year, make, model, plate_number")
+        .single();
+    if (error) {
+        console.error("Could not save vehicle:", error);
+        // 23505 is postgres's unique violation, which a duplicate plate gives
+        return fail(error.code === "23505"
+            ? "That license plate is already registered to another vehicle."
+            : "Couldn't save the new vehicle. Please try again.");
+    }
+
+    // if the appointment fails after this, a retry uses this vehicle instead of adding it twice
+    vehicles.push(data);
+    $("am-vehicle").insertAdjacentHTML("beforeend", `<option value="${data.vehicle_id}">${escapeHtml(vehicleLabel(data))}</option>`);
+    $("am-vehicle").value = data.vehicle_id;
+    $("am-new-vehicle").classList.add("hidden");
+    return data.vehicle_id;
+}
+
 function buildNew() {
     const value = (id) => $(id).value.trim();
     const customerId = $("am-customer").value;
@@ -484,31 +547,18 @@ function buildNew() {
     if (!customerId) return fail("Select a customer.");
 
     let newCustomer = null;
-    let contact = customers.find((c) => c.customer_id === customerId)?.phone_number ?? "";
-
     if (customerId === NEW_CUSTOMER) {
         if (!value("am-new-name")) return fail("Enter the new customer's full name.");
         if (!PHONE_PATTERN.test(value("am-new-phone"))) return fail("Enter a valid phone number (7 to 20 digits).");
         newCustomer = { full_name: value("am-new-name"), phone_number: value("am-new-phone"), created_by: options.userId };
-        contact = newCustomer.phone_number;
     }
 
-    // same rules as the vehicles table
-    let newVehicle = null;
-    if ($("am-vehicle").value === NEW_VEHICLE) {
-        const year = Number(value("am-new-year"));
-        if (!value("am-new-make")) return fail("Enter the vehicle's make.");
-        if (!value("am-new-model")) return fail("Enter the vehicle's model.");
-        if (!Number.isInteger(year) || year < 1900 || year > 2100) return fail("Enter a year between 1900 and 2100.");
-        if (!value("am-new-plate")) return fail("Enter the license plate.");
-        newVehicle = {
-            make: value("am-new-make"),
-            model: value("am-new-model"),
-            year,
-            plate_number: value("am-new-plate").toUpperCase(),
-            colour: value("am-new-colour") || null,
-        };
-    }
+    // an empty contact falls back to the new customer's phone
+    const contact = value("am-contact") || newCustomer?.phone_number || "";
+    if (!PHONE_PATTERN.test(contact)) return fail("Enter a valid contact number (7 to 20 digits).");
+
+    const newVehicle = readNewVehicle();
+    if (newVehicle === false) return null;
 
     if (!value("am-service")) return fail("Describe the service requested.");
     const when = readWhen();
@@ -553,25 +603,8 @@ async function saveNew() {
 
     // then a new vehicle, for that customer
     if (newVehicle) {
-        const { data, error } = await supabase
-            .from("vehicles")
-            .insert({ ...newVehicle, customer_id: record.customer_id })
-            .select("vehicle_id, customer_id, year, make, model, plate_number")
-            .single();
-        if (error) {
-            console.error("Could not save vehicle:", error);
-            // 23505 is postgres's unique violation, which a duplicate plate gives
-            return fail(error.code === "23505"
-                ? "That license plate is already registered to another vehicle."
-                : "Couldn't save the new vehicle. Please try again.");
-        }
-        record.vehicle_id = data.vehicle_id;
-
-        // same as the customer: a retry uses this vehicle instead of adding it twice
-        vehicles.push(data);
-        $("am-vehicle").insertAdjacentHTML("beforeend", `<option value="${data.vehicle_id}">${escapeHtml(vehicleLabel(data))}</option>`);
-        $("am-vehicle").value = data.vehicle_id;
-        $("am-new-vehicle").classList.add("hidden");
+        record.vehicle_id = await saveNewVehicle(newVehicle, record.customer_id);
+        if (!record.vehicle_id) return null;
     }
 
     const { data, error } = await supabase.from("appointments").insert(record).select("appointment_id").single();
@@ -588,10 +621,18 @@ async function saveEdit() {
     const value = (id) => $(id).value.trim();
     if (!PHONE_PATTERN.test(value("am-contact"))) return fail("Enter a valid contact number (7 to 20 digits).");
     if (!value("am-service")) return fail("Describe the service requested.");
+    const newVehicle = readNewVehicle();
+    if (newVehicle === false) return null;
+
+    let vehicleId = $("am-vehicle").value || null;
+    if (newVehicle) {
+        vehicleId = await saveNewVehicle(newVehicle, appointment.customer_id);
+        if (!vehicleId) return null;
+    }
 
     const changes = {
         contact_number: value("am-contact"),
-        vehicle_id: $("am-vehicle").value || null,
+        vehicle_id: vehicleId,
         service_requested: value("am-service"),
         ...reminderColumns($("am-reminder").value, appointment),
     };
@@ -689,6 +730,7 @@ export function initAppointmentModals(settings = {}) {
         if (e.target.id === "am-when") checkOverlap();
     });
     root.addEventListener("input", (e) => {
+        if (e.target.id === "am-new-phone") fillContact(e.target.value.trim());
         if (e.target.id === "am-when") checkOverlap();
     });
 
